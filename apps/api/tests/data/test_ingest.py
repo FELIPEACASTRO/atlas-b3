@@ -1,9 +1,20 @@
 import os
 
+import pytest
+
 from atlas_api.data import store
 from atlas_api.data.ingest import ingest_cotahist
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "cotahist_sample.txt")
+
+
+def test_ingest_rejects_multi_date_file(tmp_path):
+    line = open(FIXTURE, encoding="latin-1").read().splitlines()[0]  # date at [2:10]
+    other_day = line[:2] + "20240103" + line[10:]
+    p = tmp_path / "multi.txt"
+    p.write_text(line + "\n" + other_day + "\n", encoding="latin-1")
+    with pytest.raises(ValueError):
+        ingest_cotahist(str(p), str(tmp_path / "x.db"), rate=0.1165)
 
 
 def test_ingest_maps_option_to_correct_underlying_via_isin(tmp_path):

@@ -39,6 +39,10 @@ def _years_to_expiry(asof: dt.date, venc: dt.date) -> float:
 
 def ingest_cotahist(path: str, db_path: str, *, rate: float | None = None, q: float = 0.0) -> int:
     quotes = parse_file(path)
+    if quotes and len({qt.data for qt in quotes}) > 1:
+        # the daily file is mono-date; an annual file would make asof wrong and
+        # mix sessions (audit finding). Ingest daily files.
+        raise ValueError("COTAHIST multi-data (arquivo anual?) — ingira arquivos diários")
     asof = quotes[0].data if quotes else dt.date.today()
     asof_s = asof.isoformat()
     # rate=None -> the live BCB-SGS Selic (correct for today's file); historical

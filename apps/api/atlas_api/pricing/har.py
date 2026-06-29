@@ -28,7 +28,7 @@ def _solve(matrix: list[list[float]], rhs: list[float]) -> list[float]:
     return [aug[i][n] / aug[i][i] for i in range(n)]
 
 
-def fit_har(rv: list[float], *, weekly: int = 5, monthly: int = 22) -> tuple[float, float, float, float]:
+def fit_har(rv: list[float], *, weekly: int = 5, monthly: int = 21) -> tuple[float, float, float, float]:
     """Fit HAR-RV; return ``(beta0, beta_d, beta_w, beta_m)``.
 
     ``rv`` is a realized-vol (or variance) series, oldest first. Targets RV_t on
@@ -63,7 +63,7 @@ def fit_har(rv: list[float], *, weekly: int = 5, monthly: int = 22) -> tuple[flo
     return (beta[0], beta[1], beta[2], beta[3])
 
 
-def forecast_har(coef: tuple[float, float, float, float], rv: list[float], *, weekly: int = 5, monthly: int = 22) -> float:
+def forecast_har(coef: tuple[float, float, float, float], rv: list[float], *, weekly: int = 5, monthly: int = 21) -> float:
     b0, bd, bw, bm = coef
     return (
         b0
