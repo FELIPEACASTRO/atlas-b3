@@ -1,0 +1,25 @@
+from atlas_api.data import store
+
+
+def test_roundtrip(tmp_path):
+    db = str(tmp_path / "s.db")
+    conn = store.connect(db)
+    store.insert_instruments(conn, [
+        ("PETR4", "acao", 38.42, 1.2, 1.2e9, None, None, "2024-01-02"),
+        ("VALE3", "acao", 61.30, -0.8, 9.8e8, None, None, "2024-01-02"),
+    ])
+    store.insert_options(conn, [
+        ("PETR4", "PETRA399", "call", 38.67, "2024-01-19", 1.36, 0.512, 0.30, 0.04, 1.5, "2024-01-02"),
+    ])
+    store.set_meta(conn, "asof", "2024-01-02")
+    conn.commit()
+
+    assert store.count(conn) == 2
+    assert store.get_meta(conn, "asof") == "2024-01-02"
+
+    scr = store.query_screener(conn, tipo="acao", min_liq=1e9)
+    assert [r["ticker"] for r in scr] == ["PETR4"]  # only PETR4 passes the liquidity filter
+
+    chain = store.query_chain(conn, "PETR4")
+    assert len(chain) == 1 and chain[0]["ticker"] == "PETRA399"
+    conn.close()
