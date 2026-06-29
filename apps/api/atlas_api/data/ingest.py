@@ -10,6 +10,7 @@ import datetime as dt
 
 from atlas_api.data import store
 from atlas_api.data.cotahist import Quote, parse_file
+from atlas_api.data.option_code import code_consistent
 from atlas_api.pricing.bs import bs_greeks
 from atlas_api.pricing.iv import implied_vol
 
@@ -43,6 +44,8 @@ def ingest_cotahist(path: str, db_path: str, *, rate: float = 0.1165, q: float =
             inst_rows.append((qt.ticker, "acao", qt.preco_ult, var, qt.volume, None, None, asof_s))
             continue
 
+        if not code_consistent(qt.ticker, qt.tipo, qt.venc.month if qt.venc else None):
+            continue  # 5th-letter convention contradicts TPMERC/expiry -> dirty row
         underlying = _guess_underlying(qt.ticker, stocks)
         base = stocks.get(underlying) if underlying else None
         iv = delta = gamma = vega = None
