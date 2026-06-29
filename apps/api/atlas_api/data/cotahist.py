@@ -18,7 +18,9 @@ class Quote:
     ticker: str
     tipo: str  # acao | call | put | outro
     preco_ult: float
-    preco_abe: float  # open (for intraday var %)
+    preco_abe: float  # open
+    preco_max: float  # high
+    preco_min: float  # low
     preco_ofc: float  # best bid
     preco_ofv: float  # best ask
     strike: float | None
@@ -42,6 +44,8 @@ def parse_line(line: str) -> Quote:
         tipo=tipo,
         preco_ult=int(line[108:121]) / 100,
         preco_abe=int(line[56:69]) / 100,
+        preco_max=int(line[69:82]) / 100,
+        preco_min=int(line[82:95]) / 100,
         preco_ofc=int(line[121:134]) / 100,
         preco_ofv=int(line[134:147]) / 100,
         strike=(int(line[188:201]) / 100) if is_opt else None,
