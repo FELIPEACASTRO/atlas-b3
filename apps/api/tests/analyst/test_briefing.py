@@ -50,3 +50,17 @@ def test_verdict_is_honest_not_a_call():
     low = b.verdict.lower()
     assert "a decisão é sua" in low
     assert "garantido" not in low and "recomendo" not in low
+
+
+def test_ratio_none_when_no_defined_loss():
+    s = _setup()
+    s.max_loss_per_lot = 0.0
+    b = build_briefing(s)
+    assert b.risk_reward.ratio is None  # not inf (which serializes to null and crashes the UI)
+
+
+def test_sizing_never_negative_with_bad_capital():
+    s = _setup()
+    s.capital = -50_000
+    b = build_briefing(s)
+    assert all(v.lotes >= 0 for v in b.sizing.values())

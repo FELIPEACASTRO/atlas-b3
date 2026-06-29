@@ -45,7 +45,7 @@ class RiskReward:
     max_gain_per_lot: float
     max_loss_per_lot: float
     breakeven: float
-    ratio: float
+    ratio: float | None
 
 
 @dataclass
@@ -65,7 +65,7 @@ def _sizing(capital: float, max_loss_per_lot: float) -> dict[str, Sizing]:
     per_lot_loss = max_loss_per_lot * CONTRACT_MULTIPLIER
     out: dict[str, Sizing] = {}
     for name, pct in _PROFILE_PCT.items():
-        lotes = floor((capital * pct) / per_lot_loss) if per_lot_loss > 0 else 0
+        lotes = max(0, floor((capital * pct) / per_lot_loss)) if per_lot_loss > 0 else 0
         out[name] = Sizing(pct_capital=pct, lotes=lotes, max_loss_brl=round(lotes * per_lot_loss, 2))
     return out
 
@@ -107,7 +107,7 @@ def build_briefing(s: Setup) -> Briefing:
     if not case_against:  # honesty invariant: never one-sided
         case_against.append("Todo trade tem risco; defina o que o invalida antes de entrar.")
 
-    ratio = (s.max_gain_per_lot / s.max_loss_per_lot) if s.max_loss_per_lot > 0 else float("inf")
+    ratio = (s.max_gain_per_lot / s.max_loss_per_lot) if s.max_loss_per_lot > 0 else None
     rr = RiskReward(s.max_gain_per_lot, s.max_loss_per_lot, s.breakeven, ratio)
 
     verdict = (

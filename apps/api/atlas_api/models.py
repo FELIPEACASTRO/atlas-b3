@@ -20,7 +20,7 @@ class RiskRewardOut(BaseModel):
     max_gain_per_lot: float
     max_loss_per_lot: float
     breakeven: float
-    ratio: float
+    ratio: float | None = None
 
 
 class BriefingResponse(BaseModel):
@@ -40,9 +40,9 @@ class BriefingResponse(BaseModel):
 class ScreenerRow(BaseModel):
     ticker: str
     tipo: str
-    ultimo: float
-    var_pct: float
-    liquidez: float
+    ultimo: float | None = None
+    var_pct: float | None = None
+    liquidez: float | None = None
     iv: float | None = None
     iv_vs_rv: str | None = None
     provenance: str

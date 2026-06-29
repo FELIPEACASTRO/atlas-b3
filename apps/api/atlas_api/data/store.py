@@ -59,7 +59,7 @@ def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
 
 
 def query_screener(conn, *, tipo=None, min_liq=0.0, limit=200) -> list[dict]:
-    sql = "SELECT * FROM instruments WHERE liquidez >= ?"
+    sql = "SELECT * FROM instruments WHERE COALESCE(liquidez, 0) >= ?"
     args: list = [min_liq]
     if tipo:
         sql += " AND tipo = ?"

@@ -52,3 +52,26 @@ def test_screener_from_real_store(tmp_path, monkeypatch):
     rows = r.json()
     assert any(row["ticker"] == "PETR4" for row in rows)
     assert all("COTAHIST EOD" in row["provenance"] for row in rows)
+
+
+def test_screener_handles_null_ultimo(tmp_path, monkeypatch):
+    from atlas_api.data import store
+
+    db = str(tmp_path / "n.db")
+    conn = store.connect(db)
+    store.insert_instruments(conn, [("XXXX3", "acao", None, None, None, None, None, "2024-01-02")])
+    conn.commit()
+    conn.close()
+    monkeypatch.setenv("ATLAS_DB", db)
+    r = client.get("/screener")
+    assert r.status_code == 200  # a null ultimo must not 500 the whole endpoint
+    assert r.json()[0]["ultimo"] is None
+
+
+def test_corrupt_db_falls_back_to_fixture(tmp_path, monkeypatch):
+    bad = tmp_path / "bad.db"
+    bad.write_text("not a sqlite file")
+    monkeypatch.setenv("ATLAS_DB", str(bad))
+    r = client.get("/screener")
+    assert r.status_code == 200
+    assert any(row["provenance"].startswith("fixture") for row in r.json())

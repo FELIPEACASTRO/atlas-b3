@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import os
+import sqlite3
 from datetime import datetime, timezone
 
 from fastapi import FastAPI
@@ -49,11 +50,15 @@ def _store_conn():
     path = os.environ.get("ATLAS_DB")
     if not path or not os.path.exists(path):
         return None
-    conn = store.connect(path)
-    if store.count(conn) == 0:
-        conn.close()
+    try:
+        conn = store.connect(path)
+        if store.count(conn) == 0:
+            conn.close()
+            return None
+        return conn
+    except sqlite3.DatabaseError:
+        # corrupted / not a sqlite file -> fall back to the labeled fixture
         return None
-    return conn
 
 
 @app.get("/health")
@@ -107,8 +112,10 @@ def screener() -> list[ScreenerRow]:
     asof_val = asof if asof else _now()
     return [
         ScreenerRow(
-            ticker=r["ticker"], tipo=r["tipo"], ultimo=r["ultimo"],
-            var_pct=r["var_pct"] or 0.0, liquidez=r["liquidez"] or 0.0,
+            ticker=r["ticker"], tipo=r["tipo"],
+            ultimo=_nan_to_none(r["ultimo"]),
+            var_pct=_nan_to_none(r["var_pct"]),
+            liquidez=_nan_to_none(r["liquidez"]),
             iv=_nan_to_none(r["iv"]), iv_vs_rv=r["iv_vs_rv"],
             provenance=prov, asof=asof_val,
         )
