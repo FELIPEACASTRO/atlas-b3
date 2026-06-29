@@ -1,0 +1,15 @@
+[project]
+name = "atlas-api"
+version = "0.1.0"
+description = "ATLAS — terminal B3 (data + quant backend)"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

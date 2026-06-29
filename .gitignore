@@ -1,0 +1,11 @@
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+*.parquet
+*.duckdb
+.next/
+data_cache/
+.pytest_cache/
+CHAVE.txt
+kaggle.json
