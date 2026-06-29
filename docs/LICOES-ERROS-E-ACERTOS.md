@@ -67,7 +67,7 @@
 ---
 
 ## Parte 4 — GAPS ABERTOS (rastrear até fechar)
-- [ ] **G1** Persistir histórico de closes e computar RV → ligar `iv_vs_rv` (hoje sempre None).
+- [x] **G1** Persistir histórico de closes e computar RV → ligar `iv_vs_rv`. **FEITO** — store `prices_daily` não-destrutivo; sinal IV-vs-RV (ATM IV vs RV) validado em 3 pregões reais (150 ações com sinal). Taxa BCB-SGS ligada.
 - [ ] **G3/G4** Obter `exercise_style` e `dividend yield (q)` por série → rotear CRR p/ americanas e `q` real.
 - [ ] **S7** Persistir close D−1 → `var_pct` verdadeiro.
 - [ ] **G2** Decidir corp_actions: ligar no ex-date ou remover.
