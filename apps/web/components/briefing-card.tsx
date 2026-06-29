@@ -15,6 +15,7 @@ type Briefing = {
   confidence: string;
   verdict: string;
   provenance: string;
+  asof: string;
 };
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -30,8 +31,8 @@ export function BriefingCard() {
 
   useEffect(() => {
     let alive = true;
-    fetch(`${API}/briefing/sample`)
-      .then((r) => r.json())
+    fetch(`${API}/briefing/PETR4`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((data: Briefing) => {
         if (alive) setB(data);
       })
@@ -41,7 +42,12 @@ export function BriefingCard() {
     };
   }, []);
 
-  if (error) return <p className="text-[13px] text-[var(--text-secondary)]">API offline — suba o backend para ver o briefing ao vivo.</p>;
+  if (error)
+    return (
+      <p className="text-[13px] text-[var(--text-secondary)]">
+        Sem dados reais para o briefing. Suba a API e rode a ingestão: <code>python -m atlas_api.cli ingest --date DDMMYYYY</code>.
+      </p>
+    );
   if (!b) return <p className="text-[13px] text-[var(--text-tertiary)]">carregando briefing…</p>;
 
   const rr = b.risk_reward;
@@ -119,7 +125,10 @@ export function BriefingCard() {
         <span><b className="font-medium text-[var(--text-primary)]">Veredito:</b> {b.verdict}</span>
       </div>
 
-      <div className="mt-3 text-[11px] text-[var(--text-tertiary)]">fonte: {b.provenance}</div>
+      <div className="mt-3 text-[11px] text-[var(--text-tertiary)]">
+        fonte: {b.provenance}
+        {b.asof ? ` · asof ${b.asof.slice(0, 10)}` : ""}
+      </div>
     </div>
   );
 }

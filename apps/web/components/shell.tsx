@@ -8,6 +8,8 @@ import {
   Search,
 } from "lucide-react";
 
+import { LiveBadge } from "@/components/live-badge";
+
 const modules = [
   { icon: Radar, label: "Radar", href: "/" },
   { icon: Filter, label: "Screener", href: "/" },
@@ -60,9 +62,7 @@ export function Shell({
             <Search size={15} /> Buscar ou comando
             <span className="mono ml-auto rounded border border-[var(--border-subtle)] px-1.5 text-[11px]">⌘K</span>
           </div>
-          <div className="flex items-center gap-2 text-[13px] text-[var(--text-secondary)]">
-            <span className="h-2 w-2 rounded-full" style={{ background: "var(--up)" }} /> ao vivo · EOD
-          </div>
+          <LiveBadge />
         </header>
         <div className="p-5">{children}</div>
       </main>

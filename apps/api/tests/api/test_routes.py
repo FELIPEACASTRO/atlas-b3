@@ -75,3 +75,43 @@ def test_corrupt_db_falls_back_to_fixture(tmp_path, monkeypatch):
     r = client.get("/screener")
     assert r.status_code == 200
     assert any(row["provenance"].startswith("fixture") for row in r.json())
+
+
+def _seed_real_store(db: str) -> None:
+    from atlas_api.data import store
+
+    conn = store.connect(db)
+    store.upsert_prices(conn, [
+        ("PETR4", "2024-01-02", 37.4, 37.9, 37.4, 37.8),
+        ("PETR4", "2024-01-03", 37.8, 38.2, 37.6, 38.0),
+        ("PETR4", "2024-01-04", 38.0, 38.5, 37.9, 38.3),
+    ])
+    store.insert_instruments(conn, [("PETR4", "acao", 38.3, 1.2, 1e9, 0.30, "rico", "2024-01-04")])
+    store.insert_options(conn, [
+        ("PETR4", "PETRA38", "call", 38.0, "2024-01-19", 1.10, 0.30, 0.55, 0.04, 1.5, "2024-01-04"),
+        ("PETR4", "PETRA40", "call", 40.0, "2024-01-19", 0.40, 0.32, 0.30, 0.03, 1.2, "2024-01-04"),
+    ])
+    store.set_meta(conn, "asof", "2024-01-04")
+    conn.commit()
+    conn.close()
+
+
+def test_summary_from_real_store(tmp_path, monkeypatch):
+    db = str(tmp_path / "s.db")
+    _seed_real_store(db)
+    monkeypatch.setenv("ATLAS_DB", db)
+    s = client.get("/summary").json()
+    assert s["com_sinal"] >= 1
+    assert "COTAHIST EOD" in s["provenance"]  # real, not fixture
+
+
+def test_briefing_by_ticker_is_real(tmp_path, monkeypatch):
+    db = str(tmp_path / "b.db")
+    _seed_real_store(db)
+    monkeypatch.setenv("ATLAS_DB", db)
+    r = client.get("/briefing/PETR4")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["ticker"].startswith("PETR")
+    assert set(d["sizing"]) == {"conservador", "moderado", "agressivo"}
+    assert "COTAHIST EOD" in d["provenance"]  # built from real data, not the fixture sample

@@ -9,9 +9,9 @@ from __future__ import annotations
 import math
 import os
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from atlas_api.analyst.briefing import Setup, build_briefing
@@ -25,6 +25,7 @@ from atlas_api.models import (
 )
 from atlas_api.pricing.bs import bs_greeks, bs_price
 from atlas_api.pricing.iv import implied_vol
+from atlas_api.pricing.rv import realized_vol
 
 _FIXTURE = "fixture (sintético) — sem dado real de mercado ainda"
 
@@ -89,6 +90,83 @@ def briefing_sample() -> BriefingResponse:
         verdict=b.verdict,
         provenance=_FIXTURE,
         asof=_now(),
+    )
+
+
+@app.get("/summary")
+def summary() -> dict:
+    """Real headline metrics for the dashboard (no hardcoded numbers)."""
+    conn = _store_conn()
+    if conn is None:
+        return {"provenance": _FIXTURE, "asof": None, "underlyings": 0,
+                "com_sinal": 0, "rico": 0, "barato": 0, "vol_total": 0.0, "bova11": None}
+    rows = store.query_screener(conn, tipo="acao", min_liq=0, limit=10000)
+    asof = store.get_meta(conn, "asof") or ""
+    conn.close()
+    sig = [r for r in rows if r["iv_vs_rv"] in ("rico", "barato", "neutro")]
+    return {
+        "provenance": f"COTAHIST EOD {asof}" if asof else "COTAHIST EOD",
+        "asof": asof or None,
+        "underlyings": len(rows),
+        "com_sinal": len(sig),
+        "rico": sum(1 for r in sig if r["iv_vs_rv"] == "rico"),
+        "barato": sum(1 for r in sig if r["iv_vs_rv"] == "barato"),
+        "vol_total": sum((r["liquidez"] or 0.0) for r in rows),
+        "bova11": next((r["ultimo"] for r in rows if r["ticker"] == "BOVA11"), None),
+    }
+
+
+@app.get("/briefing/{underlying}", response_model=BriefingResponse)
+def briefing(underlying: str, capital: float = 50000.0) -> BriefingResponse:
+    """Real briefing for a real underlying: a defined-risk call spread built from
+    two adjacent strikes of the nearest expiry, with real premiums/IV/RV."""
+    underlying = underlying.upper()
+    conn = _store_conn()
+    if conn is None:
+        raise HTTPException(status_code=503, detail="sem store real — defina ATLAS_DB e ingira COTAHIST")
+    stocks = [r for r in store.query_screener(conn, tipo="acao", min_liq=0, limit=10000)
+              if r["ticker"] == underlying]
+    closes = [c for (_o, _h, _l, c) in store.price_history(conn, underlying)]
+    chain = store.query_chain(conn, underlying)
+    asof = store.get_meta(conn, "asof") or ""
+    conn.close()
+
+    if not stocks:
+        raise HTTPException(status_code=404, detail=f"{underlying} não encontrado")
+    spot = stocks[0]["ultimo"]
+    rv = realized_vol(closes) if len(closes) >= 3 else float("nan")
+    calls = [o for o in chain if o["kind"] == "call" and o["iv"] is not None and o["strike"] and o["venc"]]
+    if spot is None or rv != rv or len(calls) < 2:
+        raise HTTPException(status_code=422,
+                            detail=f"dados insuficientes para briefing de {underlying} (precisa RV + cadeia de calls)")
+
+    near_venc = min(o["venc"] for o in calls)
+    near = sorted((o for o in calls if o["venc"] == near_venc), key=lambda o: o["strike"])
+    i = min(range(len(near)), key=lambda k: abs(near[k]["strike"] - spot))
+    if i + 1 >= len(near):
+        i = len(near) - 2
+    short_leg, long_leg = near[i], near[i + 1]
+    width = long_leg["strike"] - short_leg["strike"]
+    credit = short_leg["last"] - long_leg["last"]
+    dte = (date.fromisoformat(near_venc) - date.fromisoformat(asof)).days if asof else 21
+
+    setup = Setup(
+        ticker=short_leg["ticker"], underlying=underlying, structure="trava_alta_vendida",
+        iv=short_leg["iv"], rv=round(rv, 4),
+        max_gain_per_lot=round(max(credit, 0.0), 2),
+        max_loss_per_lot=round(max(width - credit, 0.01), 2),
+        breakeven=round(short_leg["strike"] + credit, 2),
+        delta=short_leg["delta"] or 0.3,
+        liquidity_brl=stocks[0]["liquidez"] or 0.0,
+        dte=max(dte, 1), capital=capital,
+    )
+    b = build_briefing(setup)
+    return BriefingResponse(
+        ticker=b.ticker, setup_facts=b.setup_facts, case_for=b.case_for, case_against=b.case_against,
+        risk_reward=RiskRewardOut(**vars(b.risk_reward)),
+        sizing={k: SizingOut(**vars(v)) for k, v in b.sizing.items()},
+        invalidation=b.invalidation, confidence=b.confidence, verdict=b.verdict,
+        provenance=f"COTAHIST EOD {asof}" if asof else "COTAHIST EOD", asof=asof or _now(),
     )
 
 
