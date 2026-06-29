@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+:root {
+  --bg-base: oklch(0.16 0.012 265);
+  --bg-surface: oklch(0.19 0.014 265);
+  --bg-elevated: oklch(0.23 0.016 265);
+  --border-subtle: oklch(0.28 0.012 265);
+  --text-primary: oklch(0.97 0.005 265);
+  --text-secondary: oklch(0.74 0.008 265);
+  --text-tertiary: oklch(0.55 0.010 265);
+  --accent: oklch(0.80 0.16 75);
+  --up: oklch(0.74 0.17 150);
+  --down: oklch(0.64 0.20 25);
+}
+
+@theme inline {
+  --color-bg-base: var(--bg-base);
+  --color-bg-surface: var(--bg-surface);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html,
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+}
+
+body {
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+.mono {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
