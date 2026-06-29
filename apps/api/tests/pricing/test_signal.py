@@ -11,3 +11,8 @@ def test_barato():
 
 def test_neutro():
     assert classify(0.40, 0.40, band=0.10) == "neutro"
+
+
+def test_classify_nan_is_indisponivel():
+    assert classify(float("nan"), 0.33) == "indisponivel"
+    assert classify(0.40, float("nan")) == "indisponivel"

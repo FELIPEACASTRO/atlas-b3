@@ -1,6 +1,8 @@
 import math
 import statistics
 
+import pytest
+
 from atlas_api.pricing.rv import har_components, realized_vol
 
 
@@ -19,3 +21,8 @@ def test_har_components_keys():
     closes = [100 + (i % 3) for i in range(40)]
     h = har_components(closes)
     assert set(h) == {"rv_d", "rv_w", "rv_m"}
+
+
+def test_realized_vol_invalid_window_raises():
+    with pytest.raises(ValueError):
+        realized_vol([100, 101, 102], window=0)
