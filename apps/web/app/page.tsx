@@ -7,6 +7,8 @@ import {
   Search,
 } from "lucide-react";
 
+import { ScreenerTable } from "@/components/screener-table";
+
 const modules = [
   { icon: Radar, label: "Radar", active: true },
   { icon: Filter, label: "Screener", active: false },
@@ -21,37 +23,6 @@ const metrics = [
   { label: "IV rica (heur.)", value: "8", sub: "/ 37", accent: true },
   { label: "Vol. do dia", value: "R$ 24 bi" },
 ];
-
-const rows = [
-  { t: "PETR4", tipo: "Ação", last: "38,42", v: "+1,2%", up: true, liq: "R$ 1,2 bi", iv: "—", sig: "—" },
-  { t: "PETRG38", tipo: "Call", last: "1,15", v: "+4,5%", up: true, liq: "R$ 88 mi", iv: "42%", sig: "rico" },
-  { t: "VALE3", tipo: "Ação", last: "61,30", v: "−0,8%", up: false, liq: "R$ 980 mi", iv: "—", sig: "—" },
-  { t: "BBASF28", tipo: "Call", last: "0,73", v: "+6,0%", up: true, liq: "R$ 22 mi", iv: "35%", sig: "barato" },
-];
-
-function SigBadge({ sig }: { sig: string }) {
-  if (sig === "rico") {
-    return (
-      <span
-        className="text-[11px] px-2 py-0.5 rounded"
-        style={{ background: "color-mix(in oklch, var(--accent) 18%, transparent)", color: "var(--accent)" }}
-      >
-        Rico
-      </span>
-    );
-  }
-  if (sig === "barato") {
-    return (
-      <span
-        className="text-[11px] px-2 py-0.5 rounded"
-        style={{ background: "color-mix(in oklch, var(--up) 18%, transparent)", color: "var(--up)" }}
-      >
-        Barato
-      </span>
-    );
-  }
-  return <span className="text-[var(--text-tertiary)]">—</span>;
-}
 
 export default function Home() {
   return (
@@ -112,48 +83,7 @@ export default function Home() {
             ))}
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-[var(--border-subtle)]">
-            <table className="w-full text-[13px]">
-              <thead>
-                <tr className="bg-[var(--bg-surface)] text-left text-[var(--text-secondary)]">
-                  <th className="px-4 py-2.5 font-normal">Ativo</th>
-                  <th className="px-3 py-2.5 font-normal">Tipo</th>
-                  <th className="px-3 py-2.5 text-right font-normal">Último</th>
-                  <th className="px-3 py-2.5 text-right font-normal">Var %</th>
-                  <th className="px-3 py-2.5 text-right font-normal">Liquidez</th>
-                  <th className="px-3 py-2.5 text-right font-normal">IV</th>
-                  <th className="px-4 py-2.5 text-right font-normal">IV vs RV</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.t} className="border-t border-[var(--border-subtle)]">
-                    <td className="mono px-4 py-2.5 font-medium">{r.t}</td>
-                    <td className="px-3 py-2.5 text-[var(--text-secondary)]">{r.tipo}</td>
-                    <td className="mono px-3 py-2.5 text-right">{r.last}</td>
-                    <td className="mono px-3 py-2.5 text-right" style={{ color: r.up ? "var(--up)" : "var(--down)" }}>
-                      {r.v}
-                    </td>
-                    <td className="mono px-3 py-2.5 text-right">{r.liq}</td>
-                    <td className="mono px-3 py-2.5 text-right">{r.iv}</td>
-                    <td className="px-4 py-2.5 text-right">
-                      <SigBadge sig={r.sig} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="mt-3 flex items-center gap-4 text-[11.5px] text-[var(--text-tertiary)]">
-            <span className="flex items-center gap-1.5">
-              <i className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "var(--accent)" }} /> Rico = IV &gt; RV
-            </span>
-            <span className="flex items-center gap-1.5">
-              <i className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "var(--up)" }} /> Barato = IV &lt; RV
-            </span>
-            <span>Dados EOD · heurística, não recomendação</span>
-          </div>
+          <ScreenerTable />
         </div>
       </main>
     </div>
