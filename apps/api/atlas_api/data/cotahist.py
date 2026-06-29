@@ -27,6 +27,7 @@ class Quote:
     venc: date | None
     volume: float
     negocios: int
+    isin: str  # CODISI — for options this is the UNDERLYING's ISIN (authoritative mapping)
 
 
 def _opt_date(s: str) -> date | None:
@@ -52,6 +53,7 @@ def parse_line(line: str) -> Quote:
         venc=_opt_date(line[202:210]) if is_opt else None,
         volume=int(line[170:188]) / 100,
         negocios=int(line[147:152]),
+        isin=line[230:242].strip(),
     )
 
 
@@ -68,7 +70,10 @@ def parse_file(path: str, *, only_traded: bool = True) -> list[Quote]:
             line = raw.rstrip("\r\n")
             if len(line) < 245 or line[:2] != "01":
                 continue
-            quote = parse_line(line)
+            try:
+                quote = parse_line(line)
+            except (ValueError, IndexError):
+                continue  # malformed row: skip it, don't crash the whole day
             if quote.tipo == "outro":
                 continue
             if only_traded and quote.negocios == 0:

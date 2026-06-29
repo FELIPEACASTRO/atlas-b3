@@ -37,6 +37,11 @@ def ingest_cotahist(path: str, db_path: str, *, rate: float = 0.1165, q: float =
     asof = quotes[0].data if quotes else dt.date.today()
     asof_s = asof.isoformat()
     stocks = {qt.ticker: qt for qt in quotes if qt.tipo == "acao"}
+    # Authoritative option->underlying map: a COTAHIST option row carries the
+    # UNDERLYING's ISIN in CODISI. The root+suffix heuristic mismapped ~8.6% of
+    # options (e.g. PETRA* are on PETR3 ON, not PETR4 PN). ISIN first, heuristic
+    # only when the underlying didn't trade that day.
+    stock_by_isin = {qt.isin: qt.ticker for qt in quotes if qt.tipo == "acao" and qt.isin}
 
     inst_rows: list[tuple] = []
     opt_rows: list[tuple] = []
@@ -48,7 +53,7 @@ def ingest_cotahist(path: str, db_path: str, *, rate: float = 0.1165, q: float =
 
         if not code_consistent(qt.ticker, qt.tipo, qt.venc.month if qt.venc else None):
             continue  # 5th-letter convention contradicts TPMERC/expiry -> dirty row
-        underlying = _guess_underlying(qt.ticker, stocks)
+        underlying = stock_by_isin.get(qt.isin) or _guess_underlying(qt.ticker, stocks)
         base = stocks.get(underlying) if underlying else None
         iv = delta = gamma = vega = None
         if base and qt.strike and qt.venc:
