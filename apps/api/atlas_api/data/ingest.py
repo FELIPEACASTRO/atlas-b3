@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime as dt
 
 from atlas_api.data import store
+from atlas_api.data.calendar_b3 import year_fraction
 from atlas_api.data.cotahist import Quote, parse_file
 from atlas_api.data.option_code import code_consistent
 from atlas_api.pricing.bs import bs_greeks
@@ -27,7 +28,8 @@ def _guess_underlying(option_ticker: str, stocks: dict[str, Quote]) -> str | Non
 
 
 def _years_to_expiry(asof: dt.date, venc: dt.date) -> float:
-    return max((venc - asof).days, 1) / 365.0
+    # B3 options convention: business days / 252 (consistent with sqrt(252) vol).
+    return year_fraction(asof, venc)
 
 
 def ingest_cotahist(path: str, db_path: str, *, rate: float = 0.1165, q: float = 0.0) -> int:
