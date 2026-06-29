@@ -17,6 +17,10 @@ CREATE TABLE IF NOT EXISTS options (
   underlying TEXT, ticker TEXT, kind TEXT, strike REAL, venc TEXT,
   last REAL, iv REAL, delta REAL, gamma REAL, vega REAL, asof TEXT
 );
+CREATE TABLE IF NOT EXISTS prices_daily (
+  ticker TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL,
+  PRIMARY KEY (ticker, date)
+);
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
 """
 
@@ -29,8 +33,30 @@ def connect(path: str) -> sqlite3.Connection:
 
 
 def reset(conn: sqlite3.Connection) -> None:
+    # instruments/options are a per-day snapshot; prices_daily is the ACCUMULATING
+    # history (never wiped) — that's what makes realized vol / the IV-vs-RV signal
+    # possible. (audit root cause: the old full-wipe destroyed every prior day.)
     conn.execute("DELETE FROM instruments")
     conn.execute("DELETE FROM options")
+
+
+def upsert_prices(conn: sqlite3.Connection, rows: list[tuple]) -> None:
+    """Accumulate daily OHLC, idempotent per (ticker, date)."""
+    conn.executemany(
+        "INSERT OR REPLACE INTO prices_daily (ticker,date,open,high,low,close) "
+        "VALUES (?,?,?,?,?,?)",
+        rows,
+    )
+
+
+def price_history(conn: sqlite3.Connection, ticker: str, *, limit: int = 90) -> list[tuple]:
+    """Oldest-first OHLC history for a ticker (last ``limit`` sessions)."""
+    rows = conn.execute(
+        "SELECT open, high, low, close FROM prices_daily WHERE ticker = ? "
+        "ORDER BY date DESC LIMIT ?",
+        (ticker, limit),
+    ).fetchall()
+    return [(r["open"], r["high"], r["low"], r["close"]) for r in reversed(rows)]
 
 
 def insert_instruments(conn: sqlite3.Connection, rows: list[tuple]) -> None:

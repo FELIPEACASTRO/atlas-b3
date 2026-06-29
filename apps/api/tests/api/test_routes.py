@@ -45,7 +45,7 @@ def test_chain_fixture_fallback_has_iv_and_greeks(monkeypatch):
 
 def test_screener_from_real_store(tmp_path, monkeypatch):
     db = str(tmp_path / "atlas.db")
-    ingest_cotahist(FIXTURE, db)
+    ingest_cotahist(FIXTURE, db, rate=0.1165)
     monkeypatch.setenv("ATLAS_DB", db)
     r = client.get("/screener")
     assert r.status_code == 200

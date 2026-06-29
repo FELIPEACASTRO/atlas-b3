@@ -23,3 +23,16 @@ def test_roundtrip(tmp_path):
     chain = store.query_chain(conn, "PETR4")
     assert len(chain) == 1 and chain[0]["ticker"] == "PETRA399"
     conn.close()
+
+
+def test_reset_preserves_price_history(tmp_path):
+    db = str(tmp_path / "p.db")
+    conn = store.connect(db)
+    store.upsert_prices(conn, [("X", "2024-01-02", 1.0, 2.0, 0.5, 1.5)])
+    store.insert_instruments(conn, [("X", "acao", 1.5, 0.0, 100.0, None, None, "2024-01-02")])
+    store.reset(conn)
+    conn.commit()
+    assert store.count(conn) == 0  # the per-day snapshot is wiped
+    assert len(store.price_history(conn, "X")) == 1  # but the accumulating history survives
+    conn.close()
+
