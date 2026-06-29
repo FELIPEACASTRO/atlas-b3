@@ -15,6 +15,7 @@ Esta pasta preserva, em forma destilada e auditável, **tudo** que sustentou as 
 | 03 | [Ferramentas, modelos e técnicas](03-ferramentas-modelos-tecnicas.md) | Varredura HF + Kaggle + arXiv — o acionável vs. o hype |
 | 04 | [Design system & UI/UX](04-design-system-uiux.md) | Tendências 2026, navegação, tokens, stack, toques de "uau" |
 | 05 | [Revisão de código — núcleo quant](05-revisao-codigo-quant.md) | A auditoria imparcial que achou o bug crítico de IV |
+| 06 | [AIForge deep-dive exaustivo](06-aiforge-deep-dive-exaustivo.md) | 4 agentes × 48 arquivos: inventário completo de fontes de dados + libs/técnicas + o que aplicamos |
 
 ## A tese em uma frase
 
