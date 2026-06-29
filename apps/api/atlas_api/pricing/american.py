@@ -33,7 +33,11 @@ def crr_price(
     d = 1.0 / u
     disc = math.exp(-r * dt)
     p = (math.exp((r - q) * dt) - d) / (u - d)
-    p = min(1.0, max(0.0, p))  # numerical guard for extreme params
+    if not 0.0 <= p <= 1.0:
+        # risk-neutral prob outside [0,1]: the tree can't represent the drift at
+        # this step size -> the discretization is invalid (audit finding A2).
+        # Clamping here silently produced errors up to ~95%.
+        return float("nan")
 
     values = []
     for i in range(steps + 1):

@@ -8,6 +8,8 @@ available. Validate the coefficients offline against statsmodels/arch.
 """
 from __future__ import annotations
 
+import math
+
 
 def _solve(matrix: list[list[float]], rhs: list[float]) -> list[float]:
     """Gaussian elimination with partial pivoting for a small dense system."""
@@ -32,6 +34,8 @@ def fit_har(rv: list[float], *, weekly: int = 5, monthly: int = 22) -> tuple[flo
     ``rv`` is a realized-vol (or variance) series, oldest first. Targets RV_t on
     [1, RV_{t-1}, mean(RV daily..weekly), mean(RV daily..monthly)].
     """
+    if not all(math.isfinite(x) for x in rv):
+        raise ValueError("rv series has non-finite values (NaN/inf)")
     rows: list[list[float]] = []
     targets: list[float] = []
     for t in range(monthly, len(rv)):
@@ -53,6 +57,8 @@ def fit_har(rv: list[float], *, weekly: int = 5, monthly: int = 22) -> tuple[flo
             xty[a] += row[a] * targets[i]
             for b in range(p):
                 xtx[a][b] += row[a] * row[b]
+    for a in range(p):
+        xtx[a][a] += 1e-8  # tiny ridge to condition near-collinear daily/weekly/monthly lags
     beta = _solve(xtx, xty)
     return (beta[0], beta[1], beta[2], beta[3])
 

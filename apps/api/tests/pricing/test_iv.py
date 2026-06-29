@@ -44,3 +44,15 @@ def test_iv_near_lower_bracket_not_garbage():
 def test_iv_invalid_kind_raises():
     with pytest.raises(ValueError):
         implied_vol("foo", 0.0, 100, 100, 0.05, 0.0, 1.0)
+
+
+def test_iv_vega_near_zero_returns_nan_not_false_value():
+    # deep OTM short-dated put: vega ~ 0 -> no reliable IV (audit A1, was ~0.31)
+    price = bs_price("put", 100, 50, 0.0, 0.0, 0.05, 0.40)
+    assert math.isnan(implied_vol("put", price, 100, 50, 0.0, 0.0, 0.05))
+
+
+def test_iv_deep_itm_returns_nan_not_floor():
+    # deep ITM low-vol call: vega ~ 0 -> NaN, not the 1e-6 floor (audit A1)
+    price = bs_price("call", 300, 100, 0.10, 0.0, 2.0, 0.05)
+    assert math.isnan(implied_vol("call", price, 300, 100, 0.10, 0.0, 2.0))

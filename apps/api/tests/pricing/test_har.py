@@ -22,3 +22,9 @@ def test_fit_har_returns_four_coeffs_and_finite_forecast():
 def test_not_enough_data_raises():
     with pytest.raises(ValueError):
         fit_har([0.1, 0.2, 0.3])
+
+
+def test_fit_har_rejects_nan_input():
+    rv = [0.2] * 30 + [float("nan")] + [0.2] * 30
+    with pytest.raises(ValueError):
+        fit_har(rv)

@@ -47,3 +47,9 @@ def test_yang_zhang_positive_and_finite():
 
 def test_yang_zhang_short_series_is_nan():
     assert math.isnan(yang_zhang([(10.0, 10.0, 10.0, 10.0)]))
+
+
+def test_yang_zhang_invalid_ohlc_is_nan():
+    # high < low (corrupt bar) must not be masked into a plausible vol (audit A6)
+    bars = [(10.0, 10.0, 10.0, 10.0), (10.0, 9.0, 11.0, 10.0)]
+    assert math.isnan(yang_zhang(bars))

@@ -61,6 +61,8 @@ def yang_zhang(ohlc: list[tuple[float, float, float, float]]) -> float:
         prev_close = ohlc[i - 1][3]
         if min(o, h, low, c, prev_close) <= 0:
             return float("nan")
+        if not (low <= min(o, c) and max(o, c) <= h):
+            return float("nan")  # corrupt bar (high<low or close out of range) — don't mask it
         overnight.append(math.log(o / prev_close))
         open_close.append(math.log(c / o))
         rs.append(math.log(h / c) * math.log(h / o) + math.log(low / c) * math.log(low / o))

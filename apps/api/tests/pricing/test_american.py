@@ -17,3 +17,11 @@ def test_american_put_has_early_exercise_premium():
     amer = crr_price("put", 100, 100, 0.08, 0.0, 1.0, 0.30, steps=500, american=True)
     euro = crr_price("put", 100, 100, 0.08, 0.0, 1.0, 0.30, steps=500, american=False)
     assert amer > euro
+
+
+def test_crr_invalid_p_returns_nan():
+    import math
+
+    # high rate + low vol + few steps -> p out of [0,1] -> NaN, not a clamped
+    # wrong number (audit A2: clamp produced errors up to ~95%)
+    assert math.isnan(crr_price("call", 100, 90, 1.0, 0.0, 1.0, 0.02, steps=20))
