@@ -16,6 +16,7 @@ from atlas_api.data.calendar_b3 import year_fraction
 from atlas_api.data.cotahist import Quote, parse_file
 from atlas_api.data.option_code import code_consistent
 from atlas_api.pricing.bs import bs_greeks
+from atlas_api.pricing.features import put_call_ratio, skew_25d, vrp
 from atlas_api.pricing.iv import implied_vol, iv_is_reliable
 from atlas_api.pricing.rv import realized_vol
 from atlas_api.pricing.signal import classify, iv_rank
@@ -77,6 +78,8 @@ def ingest_cotahist(
     opt_inst_rows: list[tuple] = []
     opt_rows: list[tuple] = []
     atm: dict[str, tuple[float, float]] = {}  # underlying -> (|strike-spot|, iv) of the ATM option
+    vol_by_kind: dict[str, list[float]] = {}  # underlying -> [call_vol, put_vol]
+    put_deltas: dict[str, list[tuple[float, float]]] = {}  # underlying -> [(delta, iv), ...]
     for qt in quotes:
         if qt.tipo not in ("call", "put"):
             continue
@@ -84,6 +87,8 @@ def ingest_cotahist(
             continue
         underlying = stock_by_isin.get(qt.isin) or _guess_underlying(qt.ticker, stocks)
         base = stocks.get(underlying) if underlying else None
+        if underlying and qt.volume:  # flow counts regardless of whether IV is reliable
+            vol_by_kind.setdefault(underlying, [0.0, 0.0])[0 if qt.tipo == "call" else 1] += qt.volume
         iv = delta = gamma = vega = theta = None
         if base and qt.strike and qt.venc:
             T = _years_to_expiry(asof, qt.venc)
@@ -101,6 +106,8 @@ def ingest_cotahist(
                 dist = abs(qt.strike - base.preco_ult)
                 if underlying not in atm or dist < atm[underlying][0]:
                     atm[underlying] = (dist, iv_val)
+                if qt.tipo == "put":
+                    put_deltas.setdefault(underlying, []).append((delta, iv_val))
         opt_inst_rows.append((qt.ticker, qt.tipo, qt.preco_ult, None, qt.volume, iv, None, None, asof_s))
         if underlying:
             opt_rows.append((
@@ -115,6 +122,7 @@ def ingest_cotahist(
     )
 
     stock_inst_rows: list[tuple] = []
+    feat_rows: list[tuple] = []
     for qt in stocks.values():
         closes = [c for (_o, _h, _l, c) in store.price_history(conn, qt.ticker)]
         # closes[-1] is today's close (just upserted); the prior session gives a
@@ -123,16 +131,27 @@ def ingest_cotahist(
         var = _pct_change(prev_close, qt.preco_ult)
         if var is None and qt.preco_abe:
             var = _pct_change(qt.preco_abe, qt.preco_ult)
-        rv = realized_vol(closes) if len(closes) >= _MIN_HISTORY else float("nan")
+        rv_val = realized_vol(closes) if len(closes) >= _MIN_HISTORY else float("nan")
         atm_iv = atm[qt.ticker][1] if qt.ticker in atm else None
-        sig = classify(atm_iv, rv) if (atm_iv is not None and rv == rv) else None
+        sig = classify(atm_iv, rv_val) if (atm_iv is not None and rv_val == rv_val) else None
         iv_col = round(atm_iv, 4) if atm_iv is not None else None
         rank = iv_rank(store.iv_history(conn, qt.ticker), iv_col) if iv_col is not None else None
         stock_inst_rows.append((qt.ticker, "acao", qt.preco_ult, var, qt.volume, iv_col, sig, rank, asof_s))
+        # labeled option features: variance premium, flow, OTM-put skew
+        cvol, pvol = vol_by_kind.get(qt.ticker, [0.0, 0.0])
+        rv_arg = rv_val if rv_val == rv_val else None
+        feat = (
+            vrp(atm_iv, rv_arg),
+            put_call_ratio(cvol, pvol),
+            skew_25d(put_deltas.get(qt.ticker, []), atm_iv),
+        )
+        if any(f is not None for f in feat):
+            feat_rows.append((qt.ticker, feat[0], feat[1], feat[2], asof_s))
 
     store.reset(conn)
     store.insert_instruments(conn, stock_inst_rows + opt_inst_rows)
     store.insert_options(conn, opt_rows)
+    store.insert_features(conn, feat_rows)
     store.set_meta(conn, "asof", asof_s)
     conn.commit()
     total = store.count(conn)

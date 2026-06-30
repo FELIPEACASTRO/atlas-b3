@@ -46,6 +46,9 @@ class ScreenerRow(BaseModel):
     iv: float | None = None
     iv_vs_rv: str | None = None
     iv_rank: float | None = None
+    vrp: float | None = None
+    pc_ratio: float | None = None
+    skew: float | None = None
     provenance: str
     asof: datetime
 

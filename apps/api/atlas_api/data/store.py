@@ -25,6 +25,9 @@ CREATE TABLE IF NOT EXISTS iv_daily (
   ticker TEXT, date TEXT, atm_iv REAL,
   PRIMARY KEY (ticker, date)
 );
+CREATE TABLE IF NOT EXISTS underlying_features (
+  ticker TEXT PRIMARY KEY, vrp REAL, pc_ratio REAL, skew REAL, asof TEXT
+);
 CREATE TABLE IF NOT EXISTS positions (ticker TEXT PRIMARY KEY, qty REAL);
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
 """
@@ -55,6 +58,7 @@ def reset(conn: sqlite3.Connection) -> None:
     # possible. (audit root cause: the old full-wipe destroyed every prior day.)
     conn.execute("DELETE FROM instruments")
     conn.execute("DELETE FROM options")
+    conn.execute("DELETE FROM underlying_features")
 
 
 def upsert_prices(conn: sqlite3.Connection, rows: list[tuple]) -> None:
@@ -92,6 +96,15 @@ def insert_options(conn: sqlite3.Connection, rows: list[tuple]) -> None:
     )
 
 
+def insert_features(conn: sqlite3.Connection, rows: list[tuple]) -> None:
+    """Per-underlying option features (ticker, vrp, pc_ratio, skew, asof) for the snapshot."""
+    conn.executemany(
+        "INSERT OR REPLACE INTO underlying_features (ticker,vrp,pc_ratio,skew,asof) "
+        "VALUES (?,?,?,?,?)",
+        rows,
+    )
+
+
 def upsert_iv_daily(conn: sqlite3.Connection, rows: list[tuple]) -> None:
     """Accumulate per-underlying ATM IV history (ticker, date, atm_iv) for IV Rank."""
     conn.executemany(
@@ -119,12 +132,16 @@ def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
 
 
 def query_screener(conn, *, tipo=None, min_liq=0.0, limit=200) -> list[dict]:
-    sql = "SELECT * FROM instruments WHERE COALESCE(liquidez, 0) >= ?"
+    sql = (
+        "SELECT i.*, f.vrp, f.pc_ratio, f.skew "
+        "FROM instruments i LEFT JOIN underlying_features f ON i.ticker = f.ticker "
+        "WHERE COALESCE(i.liquidez, 0) >= ?"
+    )
     args: list = [min_liq]
     if tipo:
-        sql += " AND tipo = ?"
+        sql += " AND i.tipo = ?"
         args.append(tipo)
-    sql += " ORDER BY liquidez DESC LIMIT ?"
+    sql += " ORDER BY i.liquidez DESC LIMIT ?"
     args.append(limit)
     return [dict(r) for r in conn.execute(sql, args).fetchall()]
 

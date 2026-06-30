@@ -11,6 +11,9 @@ type Row = {
   iv: number | null;
   iv_vs_rv: string | null;
   iv_rank: number | null;
+  vrp: number | null;
+  pc_ratio: number | null;
+  skew: number | null;
   provenance: string;
   asof: string;
 };
@@ -18,9 +21,9 @@ type Row = {
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 const FALLBACK: Row[] = [
-  { ticker: "PETR4", tipo: "acao", ultimo: 38.42, var_pct: 1.2, liquidez: 1.2e9, iv: null, iv_vs_rv: null, iv_rank: null, provenance: "fixture", asof: "" },
-  { ticker: "PETRG38", tipo: "call", ultimo: 1.15, var_pct: 4.5, liquidez: 88e6, iv: 0.42, iv_vs_rv: "rico", iv_rank: null, provenance: "fixture", asof: "" },
-  { ticker: "VALE3", tipo: "acao", ultimo: 61.3, var_pct: -0.8, liquidez: 9.8e8, iv: null, iv_vs_rv: null, iv_rank: null, provenance: "fixture", asof: "" },
+  { ticker: "PETR4", tipo: "acao", ultimo: 38.42, var_pct: 1.2, liquidez: 1.2e9, iv: null, iv_vs_rv: null, iv_rank: null, vrp: null, pc_ratio: null, skew: null, provenance: "fixture", asof: "" },
+  { ticker: "PETRG38", tipo: "call", ultimo: 1.15, var_pct: 4.5, liquidez: 88e6, iv: 0.42, iv_vs_rv: "rico", iv_rank: null, vrp: null, pc_ratio: null, skew: null, provenance: "fixture", asof: "" },
+  { ticker: "VALE3", tipo: "acao", ultimo: 61.3, var_pct: -0.8, liquidez: 9.8e8, iv: null, iv_vs_rv: null, iv_rank: null, vrp: null, pc_ratio: null, skew: null, provenance: "fixture", asof: "" },
 ];
 
 function fmtLiq(n: number): string {
@@ -94,6 +97,7 @@ export function ScreenerTable() {
               <th className="px-3 py-2.5 text-right font-normal">Liquidez</th>
               <th className="px-3 py-2.5 text-right font-normal">IV</th>
               <th className="px-3 py-2.5 text-right font-normal">IV Rank</th>
+              <th className="px-3 py-2.5 text-right font-normal" title="prêmio de variância: IV − RV em pontos de vol">VRP</th>
               <th className="px-4 py-2.5 text-right font-normal">IV vs RV</th>
             </tr>
           </thead>
@@ -112,6 +116,9 @@ export function ScreenerTable() {
                 <td className="mono px-3 py-2.5 text-right">{fmtLiq(r.liquidez)}</td>
                 <td className="mono px-3 py-2.5 text-right">{r.iv != null ? `${(r.iv * 100).toFixed(0)}%` : "—"}</td>
                 <td className="mono px-3 py-2.5 text-right">{r.iv_rank != null ? r.iv_rank.toFixed(0) : "—"}</td>
+                <td className="mono px-3 py-2.5 text-right" style={{ color: r.vrp == null ? undefined : r.vrp >= 0 ? "var(--accent)" : "var(--up)" }}>
+                  {r.vrp != null ? `${r.vrp >= 0 ? "+" : ""}${(r.vrp * 100).toFixed(1)}` : "—"}
+                </td>
                 <td className="px-4 py-2.5 text-right">
                   <SigBadge sig={r.iv_vs_rv} />
                 </td>

@@ -199,6 +199,8 @@ def screener() -> list[ScreenerRow]:
             liquidez=_nan_to_none(r["liquidez"]),
             iv=_nan_to_none(r["iv"]), iv_vs_rv=r["iv_vs_rv"],
             iv_rank=_nan_to_none(r["iv_rank"]),
+            vrp=_nan_to_none(r["vrp"]), pc_ratio=_nan_to_none(r["pc_ratio"]),
+            skew=_nan_to_none(r["skew"]),
             provenance=prov, asof=asof_val,
         )
         for r in rows
