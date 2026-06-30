@@ -16,7 +16,7 @@ from atlas_api.data.calendar_b3 import year_fraction
 from atlas_api.data.cotahist import Quote, parse_file
 from atlas_api.data.option_code import code_consistent
 from atlas_api.pricing.bs import bs_greeks
-from atlas_api.pricing.iv import implied_vol
+from atlas_api.pricing.iv import implied_vol, iv_is_reliable
 from atlas_api.pricing.rv import realized_vol
 from atlas_api.pricing.signal import classify
 
@@ -73,7 +73,11 @@ def ingest_cotahist(path: str, db_path: str, *, rate: float | None = None, q: fl
         if base and qt.strike and qt.venc:
             T = _years_to_expiry(asof, qt.venc)
             iv_val = implied_vol(qt.tipo, qt.preco_ult, base.preco_ult, qt.strike, rate, q, T)
-            if iv_val == iv_val:  # not NaN
+            # economic-validity gate, not just NaN: an at-intrinsic/stale EOD print
+            # can yield an absurd vol (real data: 464%) that reprices with non-trivial
+            # vega and would otherwise slip through. Suppress IV *and* its greeks, and
+            # keep it out of the ATM pick so the underlying signal stays clean.
+            if iv_is_reliable(qt.tipo, qt.preco_ult, base.preco_ult, qt.strike, iv_val):
                 iv = round(iv_val, 4)
                 g = bs_greeks(qt.tipo, base.preco_ult, qt.strike, rate, q, T, iv_val)
                 delta, gamma, vega = round(g["delta"], 4), round(g["gamma"], 6), round(g["vega"], 4)

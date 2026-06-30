@@ -17,6 +17,7 @@
 | S6 | CRR clampava `p∈[0,1]`, mascarando erro de até **95%** | "numerical guard" que escondia discretização inválida | `p` fora de [0,1] → NaN | clamp esconde erro; falhe alto |
 | S7 | `var_pct` = variação intraday, rotulada "Var %" (usuário lê D−1) | COTAHIST de 1 dia não tem close anterior | (pendente) renomear/persistir D−1 | rótulo tem que casar com a semântica do número |
 | S8 | Yang-Zhang mascarava OHLC corrompido (high<low) com `max(var,0)` | sem validação de barra | validar `low≤min(o,c)≤max(o,c)≤high` → NaN | não mascarar variância negativa de dado sujo |
+| S9 | `/chain` exibia **IV de até 463%** (PETRB930: S=38,63 K=3,01) como se fosse real | gate de IV só rejeitava NaN/vega≈0; preço EOD **colado no intrínseco** (deep ITM/stale) reprecifica com vol absurda e vega não-trivial — escapa | gate econômico `iv_is_reliable` (extrínseco ≥ R$0,01 **e** IV ≤ 300%) → IV+gregas = None; fora do pick ATM. Re-ingerido: **−319 opções** (4,8%), max IV 463%→272%, 0 acima de 300%, 0 no intrínseco | reprecificar ≠ ser real: sem **valor extrínseco** a IV é indefinida, não importa que a bisseção ache um número |
 
 ### 1.2 Bugs de disponibilidade / contrato
 | # | Erro | Correção (commit) | Lição |
@@ -43,7 +44,8 @@
 ## Parte 2 — ACERTOS (repetir sempre)
 - **Enquadramento honesto**: pivotar de "robô de alpha" (base rate ~3%, 97% dos PF perdem) para **painel de decisão**. Evitou perder dinheiro real perseguindo edge inexistente.
 - **Core Python puro** (sem numpy/scipy): dependency-safe no 3.14, auditável, leve. Libs pesadas só como **oráculo de teste**.
-- **NaN honesto**: o sistema **se recusa a inventar** IV em preço stale (10-12% das opções) — o produto que não mente.
+- **NaN honesto**: o sistema **se recusa a inventar** IV em preço stale/colado no intrínseco (~5% das opções pelo gate econômico, S9) — o produto que não mente.
+- **4 módulos sobre dado real**: Radar/Screener, Opções (chain IV+gregas), Analista (briefing 3 perfis, dois lados) e **Carteira** (gregas líquidas consolidadas) — todos servindo COTAHIST EOD real, 0 vazamento de fixture (auditado ao vivo).
 - **Proveniência + `asof` em todo número**; sem profecia na UI.
 - **Revisão imparcial independente**: agente que recomeça do zero pegou bugs que o autor não via (S1, S2, S3).
 - **Verificar contra dado real**: confirmamos offsets do COTAHIST e a afirmação do ISIN no arquivo verdadeiro antes de codar.
@@ -68,6 +70,8 @@
 
 ## Parte 4 — GAPS ABERTOS (rastrear até fechar)
 - [x] **G1** Persistir histórico de closes e computar RV → ligar `iv_vs_rv`. **FEITO** — store `prices_daily` não-destrutivo; sinal IV-vs-RV (ATM IV vs RV) validado em 3 pregões reais (150 ações com sinal). Taxa BCB-SGS ligada.
+- [x] **S9** Gate econômico de IV (extrínseco + banda de plausibilidade). **FEITO** — re-ingerido no DB ao vivo. Resíduo disclosed: IVs deep-ITM até ~272% permanecem (extrínseco real, porém ruidoso); o corte 300% é heurística documentada, não modelo. Aprofundar exigiria filtro por banda de delta (decisão de produto).
+- [x] **Carteira** (4º módulo): posições ações+opções, gregas líquidas (Δ/Γ/vega) agregadas da tabela real de opções; `/positions` CRUD + `/portfolio`. Validado ao vivo (PETR4 long + put curta → Δ líquido coerente).
 - [ ] **G3/G4** Obter `exercise_style` e `dividend yield (q)` por série → rotear CRR p/ americanas e `q` real.
 - [ ] **S7** Persistir close D−1 → `var_pct` verdadeiro.
 - [ ] **G2** Decidir corp_actions: ligar no ex-date ou remover.
