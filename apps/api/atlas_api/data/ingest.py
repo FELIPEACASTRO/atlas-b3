@@ -15,16 +15,15 @@ from atlas_api.data.bcb_sgs import fetch_annual_rate
 from atlas_api.data.calendar_b3 import year_fraction
 from atlas_api.data.cotahist import Quote, parse_file
 from atlas_api.data.option_code import code_consistent
-from atlas_api.pricing.bs import bs_greeks
+from atlas_api.pricing.american import american_greeks, american_iv
 from atlas_api.pricing.features import put_call_ratio, skew_25d, vrp
-from atlas_api.pricing.iv import implied_vol, iv_is_reliable
+from atlas_api.pricing.iv import iv_is_reliable
 from atlas_api.pricing.rv import realized_vol
 from atlas_api.pricing.signal import classify, iv_rank
 
 _SUFFIXES = ("4", "3", "11", "5", "6")
 _DEFAULT_RATE = 0.1165
 _MIN_HISTORY = 3  # closes needed for a realized-vol estimate
-_BD_YEAR = 252  # B3 business days/year; annual theta -> per-day decay
 
 
 def _guess_underlying(option_ticker: str, stocks: dict[str, Quote]) -> str | None:
@@ -93,16 +92,18 @@ def ingest_cotahist(
         if base and qt.strike and qt.venc:
             T = _years_to_expiry(asof, qt.venc)
             q_u = q_map.get(underlying, q)  # real dividend yield when known, else 0
-            iv_val = implied_vol(qt.tipo, qt.preco_ult, base.preco_ult, qt.strike, rate, q_u, T)
+            # B3 equity options are AMERICAN: invert the Bjerksund-Stensland price
+            # (validated vs CRR) so the early-exercise premium is not misread as IV.
+            iv_val = american_iv(qt.tipo, qt.preco_ult, base.preco_ult, qt.strike, rate, q_u, T)
             # economic-validity gate, not just NaN: an at-intrinsic/stale EOD print
             # can yield an absurd vol (real data: 464%) that reprices with non-trivial
             # vega and would otherwise slip through. Suppress IV *and* its greeks, and
             # keep it out of the ATM pick so the underlying signal stays clean.
             if iv_is_reliable(qt.tipo, qt.preco_ult, base.preco_ult, qt.strike, iv_val):
                 iv = round(iv_val, 4)
-                g = bs_greeks(qt.tipo, base.preco_ult, qt.strike, rate, q_u, T, iv_val)
+                g = american_greeks(qt.tipo, base.preco_ult, qt.strike, rate, q_u, T, iv_val)
                 delta, gamma, vega = round(g["delta"], 4), round(g["gamma"], 6), round(g["vega"], 4)
-                theta = round(g["theta"] / _BD_YEAR, 4)  # per-day decay (252 base)
+                theta = round(g["theta"], 4)  # american_greeks theta is already per-day
                 dist = abs(qt.strike - base.preco_ult)
                 if underlying not in atm or dist < atm[underlying][0]:
                     atm[underlying] = (dist, iv_val)
