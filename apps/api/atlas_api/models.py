@@ -60,3 +60,29 @@ class ChainRow(BaseModel):
     vega: float | None = None
     provenance: str
     asof: datetime
+
+
+class PositionIn(BaseModel):
+    ticker: str
+    qty: float
+
+
+class PositionRow(BaseModel):
+    ticker: str
+    tipo: str | None = None
+    qty: float
+    last: float | None = None
+    value: float | None = None
+    delta: float | None = None
+    gamma: float | None = None
+    vega: float | None = None
+
+
+class PortfolioSummary(BaseModel):
+    n_positions: int
+    total_value: float
+    net_delta: float
+    net_gamma: float
+    net_vega: float
+    provenance: str
+    asof: datetime | None = None

@@ -14,7 +14,7 @@ const modules = [
   { icon: Radar, label: "Radar", href: "/" },
   { icon: Filter, label: "Screener", href: "/" },
   { icon: CandlestickChart, label: "Opções", href: "/opcoes" },
-  { icon: Briefcase, label: "Carteira", href: "/" },
+  { icon: Briefcase, label: "Carteira", href: "/carteira" },
   { icon: UserSearch, label: "Analista", href: "/analista" },
 ];
 

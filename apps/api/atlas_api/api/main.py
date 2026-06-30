@@ -19,6 +19,9 @@ from atlas_api.data import store
 from atlas_api.models import (
     BriefingResponse,
     ChainRow,
+    PortfolioSummary,
+    PositionIn,
+    PositionRow,
     RiskRewardOut,
     ScreenerRow,
     SizingOut,
@@ -235,3 +238,77 @@ def chain(underlying: str) -> list[ChainRow]:
         )
         for r in store_rows
     ]
+
+
+def _open_writable() -> sqlite3.Connection:
+    path = os.environ.get("ATLAS_DB")
+    if not path:
+        raise HTTPException(status_code=503, detail="defina ATLAS_DB para usar a carteira")
+    return store.connect(path)
+
+
+def _enrich_positions(conn) -> list[PositionRow]:
+    out: list[PositionRow] = []
+    for ticker, qty in store.list_positions(conn):
+        inst = store.get_instrument(conn, ticker)
+        if inst is None:
+            out.append(PositionRow(ticker=ticker, qty=qty))  # held but no current quote
+            continue
+        tipo, last = inst["tipo"], inst["ultimo"]
+        if tipo in ("call", "put"):
+            opt = store.get_option(conn, ticker) or {}
+            mult, d, g, v = 100, opt.get("delta"), opt.get("gamma"), opt.get("vega")
+        else:
+            mult, d, g, v = 1, 1.0, 0.0, 0.0
+        value = round(qty * last * mult, 2) if last is not None else None
+        out.append(PositionRow(
+            ticker=ticker, tipo=tipo, qty=qty, last=last, value=value,
+            delta=round(qty * (d or 0.0) * mult, 4),
+            gamma=round(qty * (g or 0.0) * mult, 6),
+            vega=round(qty * (v or 0.0) * mult, 4),
+        ))
+    return out
+
+
+@app.get("/positions", response_model=list[PositionRow])
+def get_positions() -> list[PositionRow]:
+    conn = _open_writable()
+    rows = _enrich_positions(conn)
+    conn.close()
+    return rows
+
+
+@app.post("/positions", response_model=list[PositionRow])
+def add_position(pos: PositionIn) -> list[PositionRow]:
+    conn = _open_writable()
+    store.set_position(conn, pos.ticker.upper().strip(), pos.qty)
+    conn.commit()
+    rows = _enrich_positions(conn)
+    conn.close()
+    return rows
+
+
+@app.delete("/positions/{ticker}")
+def delete_position(ticker: str) -> dict:
+    conn = _open_writable()
+    store.remove_position(conn, ticker.upper())
+    conn.commit()
+    conn.close()
+    return {"status": "removed", "ticker": ticker.upper()}
+
+
+@app.get("/portfolio", response_model=PortfolioSummary)
+def portfolio() -> PortfolioSummary:
+    conn = _open_writable()
+    rows = _enrich_positions(conn)
+    asof = store.get_meta(conn, "asof")
+    conn.close()
+    return PortfolioSummary(
+        n_positions=len(rows),
+        total_value=round(sum(r.value or 0.0 for r in rows), 2),
+        net_delta=round(sum(r.delta or 0.0 for r in rows), 2),
+        net_gamma=round(sum(r.gamma or 0.0 for r in rows), 4),
+        net_vega=round(sum(r.vega or 0.0 for r in rows), 2),
+        provenance=f"COTAHIST EOD {asof}" if asof else "sem dado de mercado",
+        asof=asof or None,
+    )

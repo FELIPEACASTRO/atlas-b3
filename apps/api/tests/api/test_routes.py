@@ -86,7 +86,11 @@ def _seed_real_store(db: str) -> None:
         ("PETR4", "2024-01-03", 37.8, 38.2, 37.6, 38.0),
         ("PETR4", "2024-01-04", 38.0, 38.5, 37.9, 38.3),
     ])
-    store.insert_instruments(conn, [("PETR4", "acao", 38.3, 1.2, 1e9, 0.30, "rico", "2024-01-04")])
+    store.insert_instruments(conn, [
+        ("PETR4", "acao", 38.3, 1.2, 1e9, 0.30, "rico", "2024-01-04"),
+        ("PETRA38", "call", 1.10, None, 1e6, 0.30, None, "2024-01-04"),
+        ("PETRA40", "call", 0.40, None, 1e6, 0.32, None, "2024-01-04"),
+    ])
     store.insert_options(conn, [
         ("PETR4", "PETRA38", "call", 38.0, "2024-01-19", 1.10, 0.30, 0.55, 0.04, 1.5, "2024-01-04"),
         ("PETR4", "PETRA40", "call", 40.0, "2024-01-19", 0.40, 0.32, 0.30, 0.03, 1.2, "2024-01-04"),
@@ -115,3 +119,21 @@ def test_briefing_by_ticker_is_real(tmp_path, monkeypatch):
     assert d["ticker"].startswith("PETR")
     assert set(d["sizing"]) == {"conservador", "moderado", "agressivo"}
     assert "COTAHIST EOD" in d["provenance"]  # built from real data, not the fixture sample
+
+
+def test_positions_crud_and_portfolio_risk(tmp_path, monkeypatch):
+    db = str(tmp_path / "pf.db")
+    _seed_real_store(db)
+    monkeypatch.setenv("ATLAS_DB", db)
+    client.post("/positions", json={"ticker": "PETR4", "qty": 100})
+    rows = client.post("/positions", json={"ticker": "PETRA38", "qty": -5}).json()
+    assert {r["ticker"] for r in rows} == {"PETR4", "PETRA38"}
+    stock = next(r for r in rows if r["ticker"] == "PETR4")
+    assert stock["value"] == 3830.0  # qty * last * 1 (stock), rounded
+    assert stock["delta"] == 100.0  # stock delta = qty
+    pf = client.get("/portfolio").json()
+    assert pf["n_positions"] == 2
+    # net delta = stock(100) + short 5 calls(-5*0.55*100=-275)
+    assert pf["net_delta"] == round(100 + (-5 * 0.55 * 100), 2)
+    client.delete("/positions/PETR4")
+    assert client.get("/portfolio").json()["n_positions"] == 1

@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS prices_daily (
   ticker TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL,
   PRIMARY KEY (ticker, date)
 );
+CREATE TABLE IF NOT EXISTS positions (ticker TEXT PRIMARY KEY, qty REAL);
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
 """
 
@@ -105,3 +106,31 @@ def query_chain(conn, underlying: str, *, limit=500) -> list[dict]:
 
 def count(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT COUNT(*) FROM instruments").fetchone()[0]
+
+
+def get_instrument(conn: sqlite3.Connection, ticker: str) -> dict | None:
+    r = conn.execute("SELECT * FROM instruments WHERE ticker = ? LIMIT 1", (ticker,)).fetchone()
+    return dict(r) if r else None
+
+
+def get_option(conn: sqlite3.Connection, ticker: str) -> dict | None:
+    r = conn.execute("SELECT * FROM options WHERE ticker = ? LIMIT 1", (ticker,)).fetchone()
+    return dict(r) if r else None
+
+
+# --- positions (user data; never wiped by reset) ---
+
+def set_position(conn: sqlite3.Connection, ticker: str, qty: float) -> None:
+    if qty == 0:
+        conn.execute("DELETE FROM positions WHERE ticker = ?", (ticker,))
+    else:
+        conn.execute("INSERT OR REPLACE INTO positions (ticker, qty) VALUES (?, ?)", (ticker, qty))
+
+
+def list_positions(conn: sqlite3.Connection) -> list[tuple]:
+    rows = conn.execute("SELECT ticker, qty FROM positions ORDER BY ticker").fetchall()
+    return [(r["ticker"], r["qty"]) for r in rows]
+
+
+def remove_position(conn: sqlite3.Connection, ticker: str) -> None:
+    conn.execute("DELETE FROM positions WHERE ticker = ?", (ticker,))
