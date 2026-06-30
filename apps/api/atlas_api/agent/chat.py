@@ -13,11 +13,6 @@ from dataclasses import dataclass, field
 
 from atlas_api.agent import fallback, llm
 
-_PROV_LABEL = {
-    "openrouter": "via OpenRouter · modelo gratuito",
-    "gemini": "via Gemini · gratuito",
-    "anthropic": "via Claude",
-}
 _BUSY = ("Os modelos gratuitos estavam ocupados agora — respondi no modo simples. "
          "Tente de novo em instantes.")
 
@@ -38,8 +33,8 @@ def answer(question: str, history: list, *, conn) -> ChatResult:
 
     if llm.available():
         try:
-            text, calls, prov = llm.run(question, history, conn=conn)
-            return ChatResult(answer=text, mode="ia", tool_calls=calls, note=_PROV_LABEL.get(prov))
+            text, calls, _prov = llm.run(question, history, conn=conn)
+            return ChatResult(answer=text, mode="ia", tool_calls=calls, note=None)
         except llm.ChatUnavailable:
             text, calls, _ = fallback.answer(question, conn)
             return ChatResult(answer=text, mode="limitado", tool_calls=calls, note=_BUSY)
@@ -71,8 +66,7 @@ def answer_stream(question: str, history: list, *, conn) -> Iterator[dict]:
                     yield ev
                 elif ev["type"] == "done":
                     yield {"type": "done", "mode": "ia",
-                           "tool_calls": ev.get("tool_calls", calls),
-                           "note": _PROV_LABEL.get(ev.get("provider"))}
+                           "tool_calls": ev.get("tool_calls", calls), "note": None}
             return
         except llm.ChatUnavailable:
             text, fcalls, _ = fallback.answer(question, conn)
