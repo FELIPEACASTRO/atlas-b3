@@ -133,7 +133,7 @@ export function Chat() {
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-7rem)] max-w-3xl flex-col">
+    <div className="mx-auto flex h-[calc(100dvh-9.5rem)] max-w-3xl flex-col md:h-[calc(100vh-7rem)]">
       <div className="mb-3 flex items-center gap-2.5">
         <div className="grid h-9 w-9 place-items-center overflow-hidden rounded-xl" style={{ background: "color-mix(in oklch, var(--accent) 18%, transparent)", color: "var(--accent)" }}>
           <TioTadeu size={36} />
