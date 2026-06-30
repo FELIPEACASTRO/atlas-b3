@@ -17,6 +17,7 @@ type Strategy = {
   pop: number;
   breakevens: number[];
   legs: Leg[];
+  rationale?: string;
 };
 type Resp = {
   ticker: string;
@@ -182,6 +183,9 @@ function StrategyCard({ s, top }: { s: Strategy; top: boolean }) {
           </span>
         ))}
       </div>
+      {s.rationale ? (
+        <p className="mb-1.5 text-[11.5px] leading-relaxed text-[var(--text-secondary)]">{s.rationale}</p>
+      ) : null}
       <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-[var(--text-tertiary)]">
         <span>lotes <span className="text-[9.5px]">(cons/mod/agr)</span>: <b className="mono" style={{ color: "var(--text-secondary)" }}>{s.sizing.conservador}/{s.sizing.moderado}/{s.sizing.agressivo}</b></span>
         <span>risco máx <span className="text-[9.5px]">(mod)</span>: <b className="mono" style={{ color: "var(--down)" }}>{brl(s.max_loss)}</b></span>

@@ -80,6 +80,33 @@ def evaluate(legs: list[Leg], dens: Density, spot: float, *, mult: int = 100, lo
     }
 
 
+def rationale(s: dict, *, market_iv: float | None, physical: float | None) -> str:
+    """O 'porquê' humano de uma estratégia: tese, vol implícita×física, edge e risco.
+
+    Determinístico (não inventa): cruza a direção da tese com o fato da vol (cara/barata vs
+    nossa estimativa) e o sinal do valor esperado sob a densidade. Análise, não recomendação.
+    """
+    rich = market_iv is not None and physical is not None and market_iv > physical + 0.005
+    cheap = market_iv is not None and physical is not None and market_iv < physical - 0.005
+    pop = round(s["pop"] * 100)
+    selling = s.get("vol_stance") == "vender"
+    dirw = {"alta": "de alta", "baixa": "de baixa", "neutro": "neutra (preço na faixa)"}.get(s["thesis"], "")
+    vol_note = (
+        "a vol implícita está acima da nossa estimativa física (prêmio caro)" if rich
+        else "a vol implícita está abaixo da nossa estimativa física (prêmio barato)" if cheap
+        else "vol implícita e física estão próximas"
+    )
+    if selling:
+        edge = ("você VENDE essa vol cara — tempo e queda de vol jogam a seu favor" if rich
+                else "você vende prêmio, mas a vol não está especialmente cara aqui")
+    else:
+        edge = ("você COMPRA prêmio caro, então o valor esperado fica negativo sob a nossa densidade" if rich
+                else "você compra prêmio; com a vol barata, comprar tende a favorecer" if cheap
+                else "você compra prêmio a preço próximo do justo pela nossa densidade")
+    risk = "risco limitado às asas" if s.get("defined_risk") else "⚠ risco ilimitado (perna a descoberto)"
+    return f"Tese {dirw}: {vol_note}; {edge}. POP {pop}%, {risk}."
+
+
 # ---- Catálogo de estratégias (build_catalog) ----
 
 # perfis de risco = fração do capital arriscada por trade (sizing; o usuário escolhe a postura)

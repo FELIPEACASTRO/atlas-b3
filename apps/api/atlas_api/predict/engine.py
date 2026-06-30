@@ -20,7 +20,7 @@ from .forecast import har_leverage, vol_ensemble
 from .regime import regime, strategy_bias
 from .series import neg_return_series, rv_series
 from .ssvi import fit_market_smile
-from .strategies import build_catalog
+from .strategies import build_catalog, rationale
 from .validate import pit_uniformity
 
 _RECAL_WINDOW = 60     # janela da recalibração isotônica online (medido: rolante conserta, estático piora)
@@ -284,6 +284,9 @@ def build_strategies(
     dens = physical_density(spot=spot, sigma_iv=physical, rv=physical, vrp=0.0, T=prazo / 365.0)
     opts = _expiry_options(chain, asof, prazo)
     cat = build_catalog(spot, dens, opts, visao=visao, capital=capital) if opts else []
+    mvp = pred["market_vs_physical"]
+    for s in cat:                                              # o 'porquê' humano por estratégia
+        s["rationale"] = rationale(s, market_iv=mvp.get("iv"), physical=mvp.get("physical"))
     return {
         **base,
         "regime": pred["regime"],
