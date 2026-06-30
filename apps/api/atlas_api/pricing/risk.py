@@ -24,3 +24,26 @@ def stress_pnl(positions: list[tuple[float, float, float, float]], shock: float,
 
 # the spot shocks (fractions) shown in the Carteira stress ladder
 SPOT_SHOCKS = (-0.10, -0.05, -0.02, 0.0, 0.02, 0.05, 0.10)
+
+
+def payoff_at_expiry(positions: list[tuple], shock: float) -> float:
+    """Mark-to-market P&L at expiry for a uniform ``shock`` (fraction of spot).
+
+    ``positions`` is a list of (kind, strike, spot, qty, mult, entry) where kind is
+    None for a stock leg. Options settle to intrinsic; the P&L is relative to the
+    current marks, so at shock 0 a long option already shows its lost time value.
+    """
+    total = 0.0
+    for kind, strike, spot, qty, mult, entry, *_ in positions:
+        s2 = (spot or 0.0) * (1.0 + shock)
+        if kind is None:  # stock leg
+            total += (qty or 0.0) * (s2 - (spot or 0.0))
+        else:
+            intrinsic = max(s2 - strike, 0.0) if kind == "call" else max(strike - s2, 0.0)
+            total += (qty or 0.0) * mult * (intrinsic - (entry or 0.0))
+    return round(total, 2)
+
+
+def payoff_grid(lo: float = -0.30, hi: float = 0.30, n: int = 41) -> list[float]:
+    """Evenly spaced spot shocks for the payoff/risk curve."""
+    return [lo + (hi - lo) * i / (n - 1) for i in range(n)]

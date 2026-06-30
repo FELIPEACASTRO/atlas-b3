@@ -108,6 +108,18 @@ class StressResponse(BaseModel):
     asof: datetime | None = None
 
 
+class PayoffPoint(BaseModel):
+    shock_pct: float    # uniform spot move
+    pnl_now: float      # mark-to-market today (delta-gamma)
+    pnl_expiry: float   # P&L if held to expiry (intrinsic)
+
+
+class PayoffResponse(BaseModel):
+    points: list[PayoffPoint]
+    provenance: str
+    asof: datetime | None = None
+
+
 class HistoryPoint(BaseModel):
     date: str
     iv: float | None = None   # ATM implied vol that session

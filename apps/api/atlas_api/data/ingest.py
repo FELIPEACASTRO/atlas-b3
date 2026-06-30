@@ -156,6 +156,7 @@ def ingest_cotahist(
     store.insert_options(conn, opt_rows)
     store.insert_features(conn, feat_rows)
     store.set_meta(conn, "asof", asof_s)
+    store.set_meta(conn, "rate", repr(rate))  # the risk-free used, for revaluation
     conn.commit()
     total = store.count(conn)
     conn.close()

@@ -21,6 +21,8 @@ from atlas_api.models import (
     ChainRow,
     HistoryPoint,
     HistoryResponse,
+    PayoffPoint,
+    PayoffResponse,
     PortfolioSummary,
     PositionIn,
     PositionRow,
@@ -33,9 +35,11 @@ from atlas_api.models import (
     SurfacePoint,
     SurfaceResponse,
 )
+from atlas_api.data.calendar_b3 import year_fraction
+from atlas_api.pricing.american import bjerksund_stensland
 from atlas_api.pricing.bs import bs_greeks, bs_price
 from atlas_api.pricing.iv import implied_vol
-from atlas_api.pricing.risk import SPOT_SHOCKS, stress_pnl
+from atlas_api.pricing.risk import SPOT_SHOCKS, payoff_at_expiry, payoff_grid, stress_pnl
 from atlas_api.pricing.rv import realized_vol
 from atlas_api.pricing.signal import iv_rank
 
@@ -422,6 +426,72 @@ def portfolio_stress() -> StressResponse:
         scenarios=[StressPoint(shock_pct=round(s * 100, 1), pnl=stress_pnl(inputs, s)) for s in SPOT_SHOCKS],
         pnl_vol_up=round(sum(r.vega or 0.0 for r in rows) * 0.05, 2),  # IV +5 vol points
         theta_per_day=round(sum(r.theta or 0.0 for r in rows), 2),
+        provenance=f"COTAHIST EOD {asof}" if asof else "sem dado de mercado",
+        asof=asof or None,
+    )
+
+
+def _payoff_inputs(conn, asof: str | None) -> list[tuple]:
+    """Per-position (kind, strike, spot, qty, mult, entry, iv, T) for the payoff.
+
+    iv/T let the 'today' curve be a full revaluation (exact, no Taylor divergence);
+    None for a stock leg.
+    """
+    asof_d = date.fromisoformat(asof) if asof else None
+    out: list[tuple] = []
+    for ticker, qty in store.list_positions(conn):
+        inst = store.get_instrument(conn, ticker)
+        if inst is None:
+            continue
+        if inst["tipo"] in ("call", "put"):
+            opt = store.get_option(conn, ticker) or {}
+            u = store.get_instrument(conn, opt.get("underlying") or "") or {}
+            spot = u.get("ultimo")
+            if spot is None or opt.get("strike") is None:
+                continue
+            t = year_fraction(asof_d, date.fromisoformat(opt["venc"])) if (asof_d and opt.get("venc")) else None
+            out.append((inst["tipo"], opt["strike"], spot, qty, 100, opt.get("last") or 0.0, opt.get("iv"), t))
+        else:
+            out.append((None, None, inst["ultimo"] or 0.0, qty, 1, 0.0, None, None))  # stock leg
+    return out
+
+
+def _payoff_now(positions: list[tuple], shock: float, r: float) -> float:
+    """Mark-to-market P&L today at a uniform spot ``shock`` — full revaluation.
+
+    Options are repriced with Bjerksund-Stensland at the bumped spot (same IV/T);
+    the difference is exactly 0 at shock 0 and captures convexity without Taylor
+    divergence. Falls back to delta-only if IV/T are unavailable.
+    """
+    total = 0.0
+    for kind, strike, spot, qty, mult, _entry, iv, t in positions:
+        s2 = (spot or 0.0) * (1.0 + shock)
+        if kind is None:
+            total += (qty or 0.0) * (s2 - (spot or 0.0))
+        elif iv and t and t > 0:
+            v2 = bjerksund_stensland(kind, s2, strike, r, 0.0, t, iv)
+            v0 = bjerksund_stensland(kind, spot, strike, r, 0.0, t, iv)
+            total += (qty or 0.0) * mult * (v2 - v0)
+    return round(total, 2)
+
+
+@app.get("/portfolio/payoff", response_model=PayoffResponse)
+def portfolio_payoff() -> PayoffResponse:
+    """Risk graph: P&L today (full revaluation) vs at expiry (intrinsic) across spot."""
+    conn = _open_writable()
+    asof = store.get_meta(conn, "asof")
+    try:
+        r = float(store.get_meta(conn, "rate") or 0.14)
+    except ValueError:
+        r = 0.14
+    p_in = _payoff_inputs(conn, asof)
+    conn.close()
+    pts = [
+        PayoffPoint(shock_pct=round(s * 100, 1), pnl_now=_payoff_now(p_in, s, r), pnl_expiry=payoff_at_expiry(p_in, s))
+        for s in payoff_grid()
+    ]
+    return PayoffResponse(
+        points=pts,
         provenance=f"COTAHIST EOD {asof}" if asof else "sem dado de mercado",
         asof=asof or None,
     )

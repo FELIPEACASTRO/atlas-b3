@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { PayoffChart } from "@/components/payoff-chart";
+
 type Pos = {
   ticker: string;
   tipo: string | null;
@@ -146,6 +148,8 @@ export function Portfolio() {
           </div>
         </div>
       ) : null}
+
+      {rows.length > 0 ? <PayoffChart key={rows.map((r) => `${r.ticker}:${r.qty}`).join("|")} /> : null}
 
       {rows.length === 0 ? (
         <p className="text-[13px] text-[var(--text-tertiary)]">Sem posições. Adicione um ticker acima (ações ou opções).</p>
