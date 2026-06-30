@@ -89,7 +89,16 @@ _DEFAULT_OR_MODELS = [
     "nvidia/nemotron-3-super-120b-a12b:free",
     "openrouter/free",
 ]
+# Cerebras free tier: ~1M tokens/day, OpenAI-compatible, all models do tool use,
+# ultra-fast. NOTE: its Cloudflare blocks the default urllib UA (error 1010), so
+# every _post sends a browser User-Agent. Model ids are account-specific.
+_CEREBRAS_BASE = os.environ.get("ATLAS_CEREBRAS_BASE", "https://api.cerebras.ai/v1")
+_DEFAULT_CEREBRAS_MODELS = ["gpt-oss-120b", "gemma-4-31b", "zai-glm-4.7"]
 _GEMINI_MODEL = os.environ.get("ATLAS_GEMINI_MODEL", "gemini-2.5-flash")
+_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+)
 
 
 class ChatUnavailable(RuntimeError):
@@ -129,6 +138,10 @@ def _openrouter_key() -> str | None:
     return os.environ.get("OPENROUTER_API_KEY") or next(iter(_file_values("OPENROUTER")), None)
 
 
+def _cerebras_key() -> str | None:
+    return os.environ.get("CEREBRAS_API_KEY") or next(iter(_file_values("CEREBRAS")), None)
+
+
 def _gemini_keys() -> list[str]:
     env = [k for k in (os.environ.get("GEMINI_API_KEY"), os.environ.get("GOOGLE_API_KEY")) if k]
     return env + _file_values("GOOGLE/GEMINI")
@@ -149,14 +162,20 @@ def _anthropic_ready() -> bool:
 
 
 def provider_chain() -> list[str]:
-    """Ordered providers to try. 'auto' is FREE-only (openrouter -> gemini)."""
+    """Ordered providers to try. 'auto' is FREE-only: cerebras -> gemini -> openrouter.
+
+    Three independent free quotas as contingency — when one is rate-limited (429),
+    the next provider (different account/quota) is tried. Cerebras leads: ~1M
+    tokens/day is the largest free quota and it's the fastest.
+    """
     sel = os.environ.get("ATLAS_CHAT_PROVIDER", "auto").lower()
     avail = {
+        "cerebras": bool(_cerebras_key()),
         "openrouter": bool(_openrouter_key()),
         "gemini": bool(_gemini_keys()),
         "anthropic": _anthropic_ready(),
     }
-    order = ["openrouter", "gemini"] if sel == "auto" else [sel]
+    order = ["cerebras", "gemini", "openrouter"] if sel == "auto" else [sel]
     return [p for p in order if avail.get(p)]
 
 
@@ -169,7 +188,8 @@ def available() -> bool:
 def _post(url: str, payload: dict, headers: dict, timeout: int = 120) -> dict:
     data = json.dumps(payload).encode()
     req = urllib.request.Request(
-        url, data=data, method="POST", headers={"Content-Type": "application/json", **headers})
+        url, data=data, method="POST",
+        headers={"Content-Type": "application/json", "User-Agent": _BROWSER_UA, **headers})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.load(r)
@@ -200,14 +220,17 @@ def _oai_tools() -> list[dict]:
         for t in tools.TOOL_SCHEMAS]
 
 
-def _run_openai(model: str, key: str, question: str, history: list, *, conn) -> tuple[str, list[dict]]:
+def _run_openai(model: str, key: str, question: str, history: list, *, conn,
+                base: str = _OPENROUTER_BASE) -> tuple[str, list[dict]]:
+    """One OpenAI-compatible tool-use loop. ``base`` switches the endpoint so the
+    same loop drives OpenRouter and Cerebras (both OpenAI-compatible)."""
     messages = [{"role": "system", "content": SYSTEM}, *_history(history),
                 {"role": "user", "content": question}]
     headers = {"Authorization": f"Bearer {key}",
                "HTTP-Referer": "http://localhost:3000", "X-Title": "ATLAS"}
     tool_calls: list[dict] = []
     for _ in range(MAX_ITERS):
-        data = _post(f"{_OPENROUTER_BASE}/chat/completions", {
+        data = _post(f"{base}/chat/completions", {
             "model": model, "messages": messages, "tools": _oai_tools(),
             "temperature": 0, "max_tokens": 1024}, headers)
         choices = data.get("choices") or []
@@ -246,6 +269,23 @@ def _run_openrouter(question, history, *, conn) -> tuple[str, list[dict]]:
                 break
             continue  # free pool busy / model offline -> try the next model
     raise ChatUnavailable(f"OpenRouter gratuito indisponível ({last})")
+
+
+def _run_cerebras(question, history, *, conn) -> tuple[str, list[dict]]:
+    """Cerebras free tier (OpenAI-compatible). Tries each account model in turn."""
+    key = _cerebras_key()
+    models = [m.strip() for m in os.environ.get("ATLAS_CEREBRAS_MODELS", "").split(",") if m.strip()] \
+        or _DEFAULT_CEREBRAS_MODELS
+    last = None
+    for model in models:
+        try:
+            return _run_openai(model, key, question, history, conn=conn, base=_CEREBRAS_BASE)
+        except _ProviderError as e:
+            last = e
+            if e.code in (401, 403):  # bad key — every model fails the same; bail now
+                break
+            continue  # one model 429/404/busy -> try the next
+    raise ChatUnavailable(f"Cerebras gratuito indisponível ({last})")
 
 
 # --- Gemini (Google Generative Language, free tier) ------------------------
@@ -336,7 +376,8 @@ def _run_anthropic(question: str, history: list, *, conn, client=None) -> tuple[
     return "Precisei de etapas demais — refaça a pergunta de forma mais direta.", tool_calls
 
 
-_RUNNERS = {"openrouter": _run_openrouter, "gemini": _run_gemini, "anthropic": _run_anthropic}
+_RUNNERS = {"cerebras": _run_cerebras, "openrouter": _run_openrouter,
+            "gemini": _run_gemini, "anthropic": _run_anthropic}
 
 
 def run(question: str, history: list, *, conn) -> tuple[str, list[dict], str]:
