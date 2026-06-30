@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import {
   Radar,
@@ -9,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { LiveBadge } from "@/components/live-badge";
+import { CommandPalette } from "@/components/command-palette";
 
 const modules = [
   { icon: Radar, label: "Radar", href: "/" },
@@ -58,14 +61,18 @@ export function Shell({
 
       <main className="min-w-0 flex-1">
         <header className="flex h-14 items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-5">
-          <div className="flex w-72 items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-1.5 text-[13px] text-[var(--text-tertiary)]">
+          <button
+            onClick={() => window.dispatchEvent(new Event("atlas:open-command"))}
+            className="atlas-card flex w-72 items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-1.5 text-[13px] text-[var(--text-tertiary)]"
+          >
             <Search size={15} /> Buscar ou comando
             <span className="mono ml-auto rounded border border-[var(--border-subtle)] px-1.5 text-[11px]">⌘K</span>
-          </div>
+          </button>
           <LiveBadge />
         </header>
         <div className="p-5">{children}</div>
       </main>
+      <CommandPalette />
     </div>
   );
 }

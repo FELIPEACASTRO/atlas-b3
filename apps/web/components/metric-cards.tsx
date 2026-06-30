@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { LineChart, Flame, Snowflake, BarChart3 } from "lucide-react";
 
 type Summary = {
   provenance: string;
@@ -37,24 +38,36 @@ export function MetricCards() {
   }, []);
 
   const cards = [
-    { label: "BOVA11 (ETF Ibov)", value: s?.bova11 != null ? s.bova11.toFixed(2) : "—" },
-    { label: "IV rica (heur.)", value: s ? String(s.rico) : "—", sub: s ? `/ ${s.com_sinal}` : undefined, accent: true },
-    { label: "IV barata (heur.)", value: s ? String(s.barato) : "—" },
-    { label: "Vol. do dia", value: s ? fmtVol(s.vol_total) : "—" },
+    { label: "BOVA11 (ETF Ibov)", value: s?.bova11 != null ? s.bova11.toFixed(2) : "—", icon: LineChart, tint: "var(--text-secondary)" },
+    { label: "IV rica (heur.)", value: s ? String(s.rico) : "—", sub: s ? `/ ${s.com_sinal}` : undefined, accent: true, icon: Flame, tint: "var(--accent)" },
+    { label: "IV barata (heur.)", value: s ? String(s.barato) : "—", icon: Snowflake, tint: "var(--up)" },
+    { label: "Vol. do dia", value: s ? fmtVol(s.vol_total) : "—", icon: BarChart3, tint: "var(--text-secondary)" },
   ];
 
   return (
     <>
       <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-4">
-        {cards.map((c) => (
-          <div key={c.label} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4">
-            <div className="text-[12px] text-[var(--text-secondary)]">{c.label}</div>
-            <div className="flex items-baseline gap-1.5">
-              <span className={`mono text-xl font-medium ${c.accent ? "text-[var(--accent)]" : ""}`}>{c.value}</span>
-              {c.sub ? <span className="text-[12px] text-[var(--text-tertiary)]">{c.sub}</span> : null}
+        {cards.map((c, i) => {
+          const Icon = c.icon;
+          return (
+            <div
+              key={c.label}
+              className="atlas-card atlas-rise rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4"
+              style={{ animationDelay: `${i * 60}ms` }}
+            >
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-[12px] text-[var(--text-secondary)]">{c.label}</span>
+                <span className="grid h-6 w-6 place-items-center rounded-md" style={{ background: "color-mix(in oklch, " + c.tint + " 14%, transparent)", color: c.tint }}>
+                  <Icon size={13} />
+                </span>
+              </div>
+              <div className="flex items-baseline gap-1.5">
+                <span className={`mono text-xl font-medium ${c.accent ? "text-[var(--accent)]" : ""}`}>{c.value}</span>
+                {c.sub ? <span className="text-[12px] text-[var(--text-tertiary)]">{c.sub}</span> : null}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       <div className="mb-4 text-[11px] text-[var(--text-tertiary)]">
         fonte: {offline ? "API offline" : s?.provenance ?? "carregando…"}

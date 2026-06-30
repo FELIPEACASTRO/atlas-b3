@@ -32,6 +32,16 @@ export function OptionsChain() {
   const [loading, setLoading] = useState(true);
   const [kind, setKind] = useState<"all" | "call" | "put">("all");
 
+  // deep-link from the command palette: /opcoes?t=PETR4
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get("t");
+    if (t) {
+      const u = t.toUpperCase();
+      setTicker(u);
+      setInput(u);
+    }
+  }, []);
+
   useEffect(() => {
     let alive = true;
     setLoading(true);

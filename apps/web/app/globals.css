@@ -34,3 +34,34 @@ body {
   font-family: var(--font-geist-mono), ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
 }
+
+/* deliberate motion: a quick pop for the command palette, a staggered rise for
+   the dashboard, and a subtle lift on interactive cards. Reduced-motion respected. */
+@keyframes atlas-pop {
+  from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+.atlas-pop { animation: atlas-pop 0.14s ease-out; }
+
+@keyframes atlas-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.atlas-rise { animation: atlas-rise 0.4s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+.atlas-card {
+  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+.atlas-card:hover {
+  border-color: color-mix(in oklch, var(--accent) 38%, var(--border-subtle));
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.5);
+}
+.atlas-row { transition: background 0.12s ease; }
+.atlas-row:hover { background: color-mix(in oklch, var(--accent) 6%, transparent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .atlas-pop, .atlas-rise { animation: none; }
+  .atlas-card, .atlas-row { transition: none; }
+  .atlas-card:hover { transform: none; }
+}
