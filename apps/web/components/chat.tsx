@@ -1,7 +1,25 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, Send, Bot, User, Wrench, Loader2 } from "lucide-react";
+import { Send, Bot, User, Wrench, Loader2 } from "lucide-react";
+
+// Tio Tadeu — the agent's avatar. Drop the image at apps/web/public/tio-tadeu.png;
+// falls back to the Bot glyph until it's there, so the UI never breaks.
+function TioTadeu({ size }: { size: number }) {
+  const [broken, setBroken] = useState(false);
+  if (broken) return <Bot size={Math.round(size * 0.5)} />;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- tiny static avatar with an onError fallback
+    <img
+      src="/tio-tadeu.png"
+      alt="Tio Tadeu"
+      width={size}
+      height={size}
+      onError={() => setBroken(true)}
+      className="h-full w-full object-cover"
+    />
+  );
+}
 
 type ToolCall = { name: string; args: Record<string, unknown> };
 type Msg = {
@@ -139,13 +157,13 @@ export function Chat() {
   return (
     <div className="mx-auto flex h-[calc(100vh-7rem)] max-w-3xl flex-col">
       <div className="mb-3 flex items-center gap-2.5">
-        <div className="grid h-9 w-9 place-items-center rounded-xl" style={{ background: "color-mix(in oklch, var(--accent) 18%, transparent)", color: "var(--accent)" }}>
-          <Sparkles size={18} />
+        <div className="grid h-9 w-9 place-items-center overflow-hidden rounded-xl" style={{ background: "color-mix(in oklch, var(--accent) 18%, transparent)", color: "var(--accent)" }}>
+          <TioTadeu size={36} />
         </div>
         <div>
-          <h1 className="text-[15px] font-medium">Chat com o ATLAS</h1>
+          <h1 className="text-[15px] font-medium">Tio Tadeu</h1>
           <p className="text-[11.5px] text-[var(--text-tertiary)]">
-            pergunte qualquer coisa sobre opções e ações — respondo com os números reais da base, nunca inventados
+            seu especialista em opções e ações da B3 — respondo com os números reais da base, nunca inventados
           </p>
         </div>
       </div>
@@ -153,12 +171,12 @@ export function Chat() {
       <div className="atlas-card flex-1 overflow-y-auto rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4">
         {msgs.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
-            <div className="grid h-12 w-12 place-items-center rounded-2xl" style={{ background: "color-mix(in oklch, var(--accent) 12%, transparent)", color: "var(--accent)" }}>
-              <Bot size={22} />
+            <div className="grid h-14 w-14 place-items-center overflow-hidden rounded-2xl" style={{ background: "color-mix(in oklch, var(--accent) 12%, transparent)", color: "var(--accent)" }}>
+              <TioTadeu size={56} />
             </div>
             <p className="max-w-sm text-[13px] text-[var(--text-secondary)]">
-              Sou um assistente honesto: explico IV, gregas, prós e contras de uma opção, e mostro os dois lados.
-              Análise, não recomendação. Comece por um exemplo:
+              Olá, sou o <b style={{ color: "var(--text-primary)" }}>Tio Tadeu</b>. Explico IV, gregas, prós e contras de
+              uma opção, e sempre mostro os dois lados. Análise, não recomendação. Comece por um exemplo:
             </p>
             <div className="grid w-full max-w-md gap-2 sm:grid-cols-2">
               {SUGGESTIONS.map((s) => (
@@ -232,8 +250,8 @@ function Bubble({ m }: { m: Msg }) {
   const live = m.mode === "ia";
   return (
     <div className="flex gap-2.5">
-      <div className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg" style={{ background: "color-mix(in oklch, var(--accent) 14%, transparent)", color: "var(--accent)" }}>
-        <Bot size={14} />
+      <div className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-lg" style={{ background: "color-mix(in oklch, var(--accent) 14%, transparent)", color: "var(--accent)" }} title="Tio Tadeu">
+        <TioTadeu size={28} />
       </div>
       <div className="min-w-0 max-w-[84%] space-y-2">
         <div className="rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3.5 py-2.5 text-[13px] leading-relaxed text-[var(--text-secondary)]">
