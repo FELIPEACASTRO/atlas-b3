@@ -89,3 +89,41 @@ def walk_forward(
         train = series[:t]
         model = fit_fn(train)
         yield series[t], predict_fn(model, train)
+
+
+# ---- Auditoria da distribuição (Task 7): CRPS + PIT + cobertura ----
+
+_INV_SQRT_PI = 1.0 / math.sqrt(math.pi)
+
+
+def crps_gaussian(y, mu, sigma):
+    """CRPS de uma preditiva Normal, forma fechada de Gneiting: regra de pontuação própria.
+
+    ``σ[z(2Φ(z)−1) + 2φ(z) − 1/√π]`` com ``z=(y−μ)/σ``. No limite ``σ→0`` tende a ``|y−μ|``.
+    Menor é melhor; pontua a distribuição inteira (não só a média). Escalar ou array.
+    """
+    sigma = np.maximum(np.asarray(sigma, dtype=float), _FLOOR)
+    z = (np.asarray(y, dtype=float) - np.asarray(mu, dtype=float)) / sigma
+    out = sigma * (z * (2.0 * stats.norm.cdf(z) - 1.0) + 2.0 * stats.norm.pdf(z) - _INV_SQRT_PI)
+    return float(out) if np.ndim(out) == 0 else out
+
+
+def pit(y, cdf_fn) -> np.ndarray:
+    """Probability Integral Transform: aplica a CDF preditiva aos realizados.
+
+    Se o modelo é bem calibrado, ``pit(y, cdf)`` ~ Uniforme[0,1]. ``cdf_fn`` é a CDF
+    preditiva (pode variar por observação se vier vetorizada).
+    """
+    return np.asarray(cdf_fn(np.asarray(y, dtype=float)), dtype=float)
+
+
+def pit_uniformity(pit_vals) -> float:
+    """p-valor do KS de ``pit_vals`` contra a Uniforme[0,1]. p>0.05 => não rejeita (calibrado)."""
+    pit_vals = np.asarray(pit_vals, dtype=float)
+    return float(stats.kstest(pit_vals, "uniform").pvalue)
+
+
+def coverage(y, lo, hi) -> float:
+    """Fração dos realizados dentro do envelope ``[lo, hi]`` (deveria bater o nominal)."""
+    y = np.asarray(y, dtype=float)
+    return float(np.mean((y >= np.asarray(lo, dtype=float)) & (y <= np.asarray(hi, dtype=float))))
