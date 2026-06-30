@@ -5,9 +5,9 @@ import { useEffect, useState } from "react";
 type Row = {
   ticker: string;
   tipo: string;
-  ultimo: number;
-  var_pct: number;
-  liquidez: number;
+  ultimo: number | null;
+  var_pct: number | null;
+  liquidez: number | null;
   iv: number | null;
   iv_vs_rv: string | null;
   iv_rank: number | null;
@@ -107,13 +107,12 @@ export function ScreenerTable() {
                 <td className="mono px-4 py-2.5 font-medium">{r.ticker}</td>
                 <td className="px-3 py-2.5 text-[var(--text-secondary)]">{tipoLabel(r.tipo)}</td>
                 <td className="mono px-3 py-2.5 text-right">
-                  {r.ultimo.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {r.ultimo != null ? r.ultimo.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—"}
                 </td>
-                <td className="mono px-3 py-2.5 text-right" style={{ color: r.var_pct >= 0 ? "var(--up)" : "var(--down)" }}>
-                  {r.var_pct >= 0 ? "+" : ""}
-                  {r.var_pct.toFixed(1)}%
+                <td className="mono px-3 py-2.5 text-right" style={{ color: r.var_pct == null ? undefined : r.var_pct >= 0 ? "var(--up)" : "var(--down)" }}>
+                  {r.var_pct != null ? `${r.var_pct >= 0 ? "+" : ""}${r.var_pct.toFixed(1)}%` : "—"}
                 </td>
-                <td className="mono px-3 py-2.5 text-right">{fmtLiq(r.liquidez)}</td>
+                <td className="mono px-3 py-2.5 text-right">{r.liquidez != null ? fmtLiq(r.liquidez) : "—"}</td>
                 <td className="mono px-3 py-2.5 text-right">{r.iv != null ? `${(r.iv * 100).toFixed(0)}%` : "—"}</td>
                 <td className="mono px-3 py-2.5 text-right">{r.iv_rank != null ? r.iv_rank.toFixed(0) : "—"}</td>
                 <td className="mono px-3 py-2.5 text-right" style={{ color: r.vrp == null ? undefined : r.vrp >= 0 ? "var(--accent)" : "var(--up)" }}>
