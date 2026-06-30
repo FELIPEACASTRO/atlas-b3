@@ -9,18 +9,21 @@ from __future__ import annotations
 import math
 import os
 import sqlite3
+from dataclasses import asdict
 from datetime import date, datetime, timezone
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from atlas_api.analyst.briefing import Setup, build_briefing
+from atlas_api.analyst.option_analysis import OptionCtx, analyze_option
 from atlas_api.data import store
 from atlas_api.models import (
     BriefingResponse,
     ChainRow,
     HistoryPoint,
     HistoryResponse,
+    OptionAnalysisOut,
     PayoffPoint,
     PayoffResponse,
     PortfolioSummary,
@@ -379,6 +382,38 @@ def history(ticker: str, window: int = 21) -> HistoryResponse:
     rank = iv_rank(iv_vals, iv_vals[-1]) if iv_vals else None
     prov = f"COTAHIST EOD {asof}" if asof else "COTAHIST EOD"
     return HistoryResponse(ticker=ticker, points=points, iv_rank=rank, provenance=prov, asof=asof)
+
+
+@app.get("/option/{ticker}", response_model=OptionAnalysisOut)
+def option_panel(ticker: str) -> OptionAnalysisOut:
+    """Didactic, two-sided decision panel for a single option series."""
+    ticker = ticker.upper()
+    conn = _store_conn()
+    if conn is None:
+        raise HTTPException(status_code=404, detail="sem dado de mercado — defina ATLAS_DB e rode a ingestão")
+    opt = store.get_option(conn, ticker)
+    if not opt or not opt.get("strike"):
+        conn.close()
+        raise HTTPException(status_code=404, detail=f"opção {ticker} não encontrada na base")
+    under = opt["underlying"]
+    inst_u = store.get_instrument(conn, under or "") or {}
+    spot = inst_u.get("ultimo")
+    asof = store.get_meta(conn, "asof")
+    closes = [c for (_d, c) in store.close_series(conn, under or "")]
+    conn.close()
+    if spot is None:
+        raise HTTPException(status_code=422, detail=f"sem preço do subjacente {under} para analisar a opção")
+    rv = realized_vol(closes[-21:]) if len(closes) >= 11 else float("nan")
+    rv = None if rv != rv else rv
+    dte = (date.fromisoformat(opt["venc"]) - date.fromisoformat(asof)).days if (opt.get("venc") and asof) else 0
+    ctx = OptionCtx(
+        ticker=ticker, underlying=under, kind=opt["kind"], strike=opt["strike"], venc=opt.get("venc") or "",
+        dte=dte, last=opt.get("last") or 0.0, spot=spot, iv=opt.get("iv"), delta=opt.get("delta"),
+        gamma=opt.get("gamma"), vega=opt.get("vega"), theta=opt.get("theta"),
+        iv_rank=inst_u.get("iv_rank"), rv=rv,
+    )
+    prov = f"COTAHIST EOD {asof}" if asof else "COTAHIST EOD"
+    return OptionAnalysisOut(**asdict(analyze_option(ctx)), provenance=prov, asof=asof)
 
 
 @app.get("/surface/{ticker}", response_model=SurfaceResponse)

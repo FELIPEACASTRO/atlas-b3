@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { VolHistory } from "@/components/vol-history";
 import { IvSurface } from "@/components/iv-surface";
+import { OptionPanel } from "@/components/option-panel";
 
 type Row = {
   ticker: string;
@@ -32,6 +33,7 @@ export function OptionsChain() {
   const [prov, setProv] = useState("");
   const [loading, setLoading] = useState(true);
   const [kind, setKind] = useState<"all" | "call" | "put">("all");
+  const [openOpt, setOpenOpt] = useState<string | null>(null);
 
   // deep-link from the command palette: /opcoes?t=PETR4
   useEffect(() => {
@@ -132,8 +134,13 @@ export function OptionsChain() {
               </thead>
               <tbody>
                 {filtered.map((r, i) => (
-                  <tr key={`${r.ticker}-${i}`} className="border-t border-[var(--border-subtle)]">
-                    <td className="mono px-4 py-2.5 font-medium">{r.ticker}</td>
+                  <tr
+                    key={`${r.ticker}-${i}`}
+                    onClick={() => setOpenOpt(r.ticker)}
+                    title={`Analisar ${r.ticker}`}
+                    className="atlas-row cursor-pointer border-t border-[var(--border-subtle)]"
+                  >
+                    <td className="mono px-4 py-2.5 font-medium" style={{ color: "var(--accent)" }}>{r.ticker}</td>
                     <td className="px-3 py-2.5">
                       <span className="text-[11px]" style={{ color: r.kind === "call" ? "#7FB6F0" : "#C3A0F5" }}>
                         {r.kind === "call" ? "Call" : "Put"}
@@ -152,10 +159,12 @@ export function OptionsChain() {
             </table>
           </div>
           <div className="mt-3 text-[11px] text-[var(--text-tertiary)]">
-            fonte: {prov} · IV/gregas (Bjerksund-Stensland, americana) · {filtered.length} séries
+            fonte: {prov} · IV/gregas (Bjerksund-Stensland, americana) · {filtered.length} séries · clique numa série para analisar
           </div>
         </>
       )}
+
+      {openOpt ? <OptionPanel ticker={openOpt} onClose={() => setOpenOpt(null)} /> : null}
     </div>
   );
 }

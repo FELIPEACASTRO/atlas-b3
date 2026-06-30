@@ -154,3 +154,40 @@ class SurfaceResponse(BaseModel):
     points: list[SurfacePoint]      # the full smile x maturity grid
     provenance: str
     asof: str | None = None
+
+
+class GreekNoteOut(BaseModel):
+    nome: str
+    valor: str
+    explicacao: str
+
+
+class OptionAnalysisOut(BaseModel):
+    ticker: str
+    underlying: str
+    kind: str
+    tipo_label: str
+    strike: float
+    venc: str
+    dte: int
+    last: float
+    spot: float
+    moneyness: str
+    moneyness_txt: str
+    intrinsic: float
+    extrinsic: float
+    iv: float | None = None
+    iv_rank: float | None = None
+    vrp: float | None = None
+    breakeven: float
+    max_perda_titular: float
+    custo_theta_dia: float
+    resumo: str
+    pros: list[str]
+    contras: list[str]
+    comprar: str
+    vender_sair: str
+    gregas: list[GreekNoteOut]
+    veredito: str
+    provenance: str
+    asof: str | None = None

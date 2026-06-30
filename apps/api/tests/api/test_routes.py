@@ -168,6 +168,19 @@ def test_history_iv_vs_rv_series(tmp_path, monkeypatch):
     assert d["iv_rank"] is not None  # 30 >= MIN_IV_HISTORY
 
 
+def test_option_panel_endpoint(tmp_path, monkeypatch):
+    db = str(tmp_path / "op.db")
+    _seed_real_store(db)  # PETR4 spot 38.3 + PETRA38 call (strike 38, last 1.10, greeks)
+    monkeypatch.setenv("ATLAS_DB", db)
+    d = client.get("/option/PETRA38").json()
+    assert d["ticker"] == "PETRA38" and d["underlying"] == "PETR4"
+    assert d["breakeven"] == 39.10 and d["max_perda_titular"] == 110.0
+    assert d["pros"] and d["contras"]            # always two-sided
+    assert d["comprar"] and d["vender_sair"]
+    assert "decisão é sua" in d["veredito"].lower()
+    assert client.get("/option/NAOEXISTE99").status_code == 404
+
+
 def test_surface_term_structure_and_grid(tmp_path, monkeypatch):
     db = str(tmp_path / "surf.db")
     _seed_real_store(db)  # PETR4 spot 38.3 + PETRA38/PETRA40 calls (2 strikes, same venc)
