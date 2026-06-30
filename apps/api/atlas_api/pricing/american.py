@@ -134,7 +134,9 @@ def american_greeks(kind: str, S: float, K: float, r: float, q: float, T: float,
     vega = (bjerksund_stensland(kind, S, K, r, q, T, sigma + 0.01)
             - bjerksund_stensland(kind, S, K, r, q, T, sigma - 0.01)) / 0.02
     dt = 1.0 / 252.0
-    theta = (bjerksund_stensland(kind, S, K, r, q, T - dt, sigma) - p) if T > dt else 0.0
+    # one-day decay; for T <= 1 day the value rolls to intrinsic at expiry, which is
+    # the LARGEST decay (not 0 — the old `else 0` zeroed near-expiry theta).
+    theta = bjerksund_stensland(kind, S, K, r, q, max(T - dt, 0.0), sigma) - p
     return {"delta": (pu - pd) / (2 * h), "gamma": (pu - 2 * p + pd) / (h * h), "vega": vega, "theta": theta}
 
 

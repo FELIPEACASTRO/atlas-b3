@@ -59,6 +59,15 @@ def test_american_greeks_signs():
     assert -1 < gp["delta"] < 0 and gp["gamma"] > 0 and gp["vega"] > 0
 
 
+def test_american_greeks_short_dated_theta_not_zero():
+    # 1-day ATM option carries the LARGEST decay (rolls to intrinsic at expiry),
+    # not 0 — regression for the old `else 0` that zeroed near-expiry theta.
+    g = american_greeks("call", 100, 100, 0.08, 0.0, 1 / 252, 0.30)
+    assert g["theta"] < 0
+    g2 = american_greeks("put", 100, 100, 0.08, 0.0, 0.5 / 252, 0.30)
+    assert g2["theta"] < 0
+
+
 def test_crr_european_converges_to_bs():
     crr = crr_price("call", 100, 100, 0.05, 0.0, 1.0, 0.20, steps=500, american=False)
     assert abs(crr - bs_price("call", 100, 100, 0.05, 0.0, 1.0, 0.20)) < 0.03

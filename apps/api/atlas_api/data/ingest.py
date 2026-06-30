@@ -89,7 +89,9 @@ def ingest_cotahist(
         if underlying and qt.volume:  # flow counts regardless of whether IV is reliable
             vol_by_kind.setdefault(underlying, [0.0, 0.0])[0 if qt.tipo == "call" else 1] += qt.volume
         iv = delta = gamma = vega = theta = None
-        if base and qt.strike and qt.venc:
+        # require expiry strictly after the snapshot: at venc <= asof the time value
+        # is ~0 and IV/greeks degenerate (gamma explodes, theta -> 0). No decision left.
+        if base and qt.strike and qt.venc and qt.venc > asof:
             T = _years_to_expiry(asof, qt.venc)
             q_u = q_map.get(underlying, q)  # real dividend yield when known, else 0
             # B3 equity options are AMERICAN: invert the Bjerksund-Stensland price
@@ -193,7 +195,7 @@ def ingest_history(
     # closest-to-spot option per underlying -> compute IV only for that one (~163/day)
     atm_q: dict[str, tuple[float, Quote, Quote]] = {}
     for qt in quotes:
-        if qt.tipo not in ("call", "put") or not qt.strike or not qt.venc:
+        if qt.tipo not in ("call", "put") or not qt.strike or not qt.venc or qt.venc <= asof:
             continue
         if not code_consistent(qt.ticker, qt.tipo, qt.venc.month):
             continue
