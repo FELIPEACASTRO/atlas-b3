@@ -49,7 +49,7 @@ from atlas_api.pricing.american import bjerksund_stensland
 from atlas_api.pricing.risk import SPOT_SHOCKS, payoff_at_expiry, payoff_grid, stress_pnl
 from atlas_api.pricing.rv import realized_vol
 from atlas_api.pricing.signal import iv_rank
-from atlas_api.predict.engine import build_prediction
+from atlas_api.predict.engine import build_prediction, build_strategies
 
 app = FastAPI(title="ATLAS API", version="0.1.0")
 app.add_middleware(
@@ -325,6 +325,27 @@ def predict(ticker: str, horizon: int = 30) -> dict:
     closes = [bar[3] for bar in ohlc]            # closes do próprio OHLC: alinhamento garantido
     return build_prediction(ticker=ticker, ohlc=ohlc, closes=closes, iv_history=iv_hist,
                             spot=spot, chain=chain, asof=asof, T_days=horizon)
+
+
+@app.get("/strategies/{ticker}")
+def strategies(ticker: str, capital: float = 20000.0, prazo: int = 30, visao: str = "alta") -> dict:
+    """Consultor de estratégias: catálogo de estruturas avaliadas por POP + valor esperado.
+
+    ``capital`` = orçamento de risco; ``visao`` ∈ {alta, baixa, neutro, renda}. Análise sobre
+    a densidade real do motor + a cadeia real; honesto quando falta dado. Nunca ordem.
+    """
+    ticker = ticker.upper()
+    conn = _require_conn()
+    inst = store.get_instrument(conn, ticker)
+    spot = inst.get("ultimo") if inst else None
+    ohlc = store.price_history(conn, ticker, limit=400)
+    iv_hist = store.iv_history(conn, ticker, limit=400)
+    chain = store.query_chain(conn, ticker, limit=5000)
+    asof = store.get_meta(conn, "asof")
+    conn.close()
+    closes = [bar[3] for bar in ohlc]
+    return build_strategies(ticker=ticker, ohlc=ohlc, closes=closes, iv_history=iv_hist,
+                            spot=spot, chain=chain, asof=asof, capital=capital, prazo=prazo, visao=visao)
 
 
 @app.get("/option/{ticker}", response_model=OptionAnalysisOut)

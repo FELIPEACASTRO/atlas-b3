@@ -20,6 +20,7 @@ from .forecast import har_leverage, vol_ensemble
 from .regime import regime, strategy_bias
 from .series import neg_return_series, rv_series
 from .ssvi import fit_market_smile
+from .strategies import build_catalog
 from .validate import pit_uniformity
 
 _RECAL_WINDOW = 60     # janela da recalibração isotônica online (medido: rolante conserta, estático piora)
@@ -232,4 +233,61 @@ def build_prediction(
                    "skew": round(skew, 4) if skew is not None else None},
         "calibration": cal,
         "note": "predição calibrada (cenário-alvo + probabilidade), não profecia nem ordem",
+    }
+
+
+def _expiry_options(chain: list[dict], asof: str | None, target_days: int) -> list[dict]:
+    """Opções (com preço) do vencimento líquido mais próximo de ``target_days``."""
+    if not chain or not asof:
+        return []
+    try:
+        a = datetime.date.fromisoformat(asof)
+    except (ValueError, TypeError):
+        return []
+    by_venc: dict[str, list[dict]] = {}
+    for o in chain:
+        if o.get("venc") and o.get("strike") and o.get("last") and o["last"] > 0:
+            by_venc.setdefault(o["venc"], []).append(o)
+    dated: list[tuple[int, list[dict]]] = []
+    for venc, opts in by_venc.items():
+        try:
+            dte = (datetime.date.fromisoformat(venc) - a).days
+        except ValueError:
+            continue
+        if dte > 0:
+            dated.append((dte, opts))
+    rich = [(dte, opts) for dte, opts in dated if len(opts) >= 10]
+    pool = rich if rich else dated
+    if not pool:
+        return []
+    return min(pool, key=lambda do: abs(do[0] - target_days))[1]
+
+
+def build_strategies(
+    *, ticker: str, ohlc: list[tuple], closes: list[float], iv_history: list[float],
+    spot: float, chain: list[dict], asof: str | None, capital: float = 20000.0,
+    prazo: int = 30, visao: str = "alta",
+) -> dict:
+    """Consultor de estratégias: catálogo avaliado por POP/EV sobre a densidade do motor.
+
+    ``capital`` é o orçamento de risco; ``visao`` ∈ {alta, baixa, neutro, renda}. Honesto:
+    sem dado/cadeia → catálogo vazio com nota. Análise, nunca ordem.
+    """
+    pred = build_prediction(ticker=ticker, ohlc=ohlc, closes=closes, iv_history=iv_history,
+                            spot=spot, chain=chain, asof=asof, T_days=prazo)
+    base = {"ticker": ticker, "spot": round(spot, 2) if spot else None, "visao": visao,
+            "capital": capital, "prazo": prazo, "provenance": pred["provenance"], "asof": asof}
+    if pred["sigma"] is None or spot is None or spot <= 0:
+        return {**base, "strategies": [], "regime": pred["regime"],
+                "note": pred.get("note", "histórico insuficiente para avaliar estratégias")}
+    physical = pred["market_vs_physical"]["physical"]
+    dens = physical_density(spot=spot, sigma_iv=physical, rv=physical, vrp=0.0, T=prazo / 365.0)
+    opts = _expiry_options(chain, asof, prazo)
+    cat = build_catalog(spot, dens, opts, visao=visao, capital=capital) if opts else []
+    return {
+        **base,
+        "regime": pred["regime"],
+        "market_vs_physical": pred["market_vs_physical"],
+        "strategies": cat[:8],
+        "note": "análise probabilística (POP + valor esperado sobre a densidade), não recomendação de compra/venda",
     }

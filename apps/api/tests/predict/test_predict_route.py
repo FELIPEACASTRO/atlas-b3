@@ -65,3 +65,20 @@ def test_predict_short_history_is_honest(tmp_path, monkeypatch):
     d = client.get("/predict/PETR4").json()
     assert d["sigma"] is None                                 # não prevê sem histórico
     assert d["calibration"]["available"] is False
+
+
+def test_strategies_without_store_returns_503(monkeypatch):
+    monkeypatch.delenv("ATLAS_DB", raising=False)
+    assert client.get("/strategies/PETR4").status_code == 503
+
+
+def test_strategies_from_real_store(tmp_path, monkeypatch):
+    db = str(tmp_path / "s.db")
+    _seed_predict_store(db, n=60)
+    monkeypatch.setenv("ATLAS_DB", db)
+    r = client.get("/strategies/PETR4?visao=alta&capital=10000&prazo=30")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["ticker"] == "PETR4" and d["visao"] == "alta"
+    assert isinstance(d["strategies"], list)                 # catálogo (pode ser curto com cadeia fina)
+    assert "recomendação" in d["note"]                       # análise, não recomendação
