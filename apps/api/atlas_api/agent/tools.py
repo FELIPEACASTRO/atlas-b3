@@ -15,9 +15,11 @@ import math
 from datetime import date
 from typing import Any, Callable
 
+from atlas_api.analyst.briefing import Setup, build_briefing
 from atlas_api.analyst.option_analysis import OptionCtx
 from atlas_api.analyst.option_analysis import analyze_option as _analyze_option
 from atlas_api.data import store
+from atlas_api.pricing.risk import SPOT_SHOCKS, payoff_at_expiry, payoff_grid, stress_pnl
 from atlas_api.pricing.rv import realized_vol
 
 _UNDERLYING_TIPOS = ("acao", "indice")
@@ -235,6 +237,152 @@ def vol_history(conn, *, ticker: str, window: int = 21) -> dict:
     }
 
 
+def market_summary(conn) -> dict:
+    """Panorama do dia (módulo Radar): quantos ativos têm sinal, quantos com vol
+    cara/barata, liquidez total e o nível do BOVA11."""
+    asof = store.get_meta(conn, "asof")
+    rows = [r for r in store.query_screener(conn, limit=10000) if r["tipo"] == "acao"]
+    sig = [r for r in rows if r.get("iv_vs_rv") in ("rico", "barato", "neutro")]
+    return {
+        "asof": asof,
+        "n_acoes": len(rows),
+        "com_sinal_iv_vs_rv": len(sig),
+        "vol_cara_rico": sum(1 for r in sig if r["iv_vs_rv"] == "rico"),
+        "vol_barata_barato": sum(1 for r in sig if r["iv_vs_rv"] == "barato"),
+        "neutro": sum(1 for r in sig if r["iv_vs_rv"] == "neutro"),
+        "liquidez_total_rs": _r(sum((r.get("liquidez") or 0.0) for r in rows), 0),
+        "bova11": next((_r(r.get("ultimo"), 2) for r in rows if r["ticker"] == "BOVA11"), None),
+    }
+
+
+def term_structure(conn, *, ticker: str) -> dict:
+    """Estrutura a termo (IV ATM por vencimento) + inclinação e skew — o que o
+    módulo Opções mostra na superfície de volatilidade."""
+    ticker = (ticker or "").upper().strip()
+    inst = store.get_instrument(conn, ticker)
+    spot = inst.get("ultimo") if inst else None
+    asof = store.get_meta(conn, "asof")
+    rows = store.query_chain(conn, ticker, limit=5000)
+    if not spot or spot <= 0 or not rows:
+        return {"error": f"sem dados suficientes de superfície para {ticker}."}
+    by_venc: dict[str, list] = {}
+    for r in rows:
+        if r.get("iv") is None or r.get("strike") is None or not r.get("venc"):
+            continue
+        by_venc.setdefault(r["venc"], []).append(r)
+    if not by_venc:
+        return {"error": f"sem IV válida na cadeia de {ticker}."}
+    expiries = []
+    for venc in sorted(by_venc):
+        opts = by_venc[venc]
+        atm = min(opts, key=lambda o: abs(o["strike"] - spot))
+        expiries.append({"venc": venc, "dte": _dte(venc, asof), "atm_iv": _r(atm["iv"])})
+    slope = None
+    if len(expiries) >= 2 and expiries[0]["atm_iv"] and expiries[-1]["atm_iv"]:
+        slope = _r(expiries[-1]["atm_iv"] - expiries[0]["atm_iv"])
+    feat = _features(conn, ticker)
+    return {
+        "asof": asof, "ticker": ticker, "spot": _r(spot, 2),
+        "estrutura_a_termo": expiries[:8],
+        "inclinacao_termo": slope,  # >0: vol sobe com o prazo (estrutura ascendente)
+        "skew": _r(feat.get("skew")), "pc_ratio": _r(feat.get("pc_ratio")),
+    }
+
+
+def briefing(conn, *, underlying: str, capital: float = 50000.0) -> dict:
+    """Briefing do Analista: monta uma trava de alta vendida (call spread) real do
+    vencimento mais próximo e devolve os dois lados + sizing para 3 perfis."""
+    underlying = (underlying or "").upper().strip()
+    stocks = [r for r in store.query_screener(conn, limit=10000) if r["ticker"] == underlying]
+    if not stocks:
+        return {"error": f"{underlying} não encontrado na base."}
+    spot = stocks[0].get("ultimo")
+    closes = [c for (_d, c) in store.close_series(conn, underlying)]
+    chain = store.query_chain(conn, underlying)
+    asof = store.get_meta(conn, "asof")
+    rv = realized_vol(closes) if len(closes) >= 3 else float("nan")
+    calls = [o for o in chain if o["kind"] == "call" and o.get("iv") is not None
+             and o.get("strike") and o.get("venc")]
+    if spot is None or rv != rv or len(calls) < 2:
+        return {"error": f"dados insuficientes para um briefing de {underlying} "
+                         "(precisa de vol realizada + cadeia de calls com IV)."}
+    near_venc = min(o["venc"] for o in calls)
+    near = sorted((o for o in calls if o["venc"] == near_venc), key=lambda o: o["strike"])
+    i = min(range(len(near)), key=lambda k: abs(near[k]["strike"] - spot))
+    if i + 1 >= len(near):
+        i = len(near) - 2
+    short_leg, long_leg = near[i], near[i + 1]
+    width = long_leg["strike"] - short_leg["strike"]
+    credit = short_leg["last"] - long_leg["last"]
+    dte = _dte(near_venc, asof) or 21
+    b = build_briefing(Setup(
+        ticker=short_leg["ticker"], underlying=underlying, structure="trava_alta_vendida",
+        iv=short_leg["iv"], rv=round(rv, 4), max_gain_per_lot=round(max(credit, 0.0), 2),
+        max_loss_per_lot=round(max(width - credit, 0.01), 2),
+        breakeven=round(short_leg["strike"] + credit, 2), delta=short_leg.get("delta") or 0.3,
+        liquidity_brl=stocks[0].get("liquidez") or 0.0, dte=max(dte, 1), capital=capital))
+    return {
+        "asof": asof, "ticker": b.ticker, "underlying": underlying,
+        "estrutura": "trava de alta vendida (call spread de crédito), vencimento mais próximo",
+        "fatos": b.setup_facts, "a_favor": b.case_for, "contra": b.case_against,
+        "risco_retorno": {"ganho_max_por_lote": b.risk_reward.max_gain_per_lot,
+                          "perda_max_por_lote": b.risk_reward.max_loss_per_lot,
+                          "breakeven": b.risk_reward.breakeven, "razao": _r(b.risk_reward.ratio, 2)},
+        "tamanho_por_perfil": {k: {"pct_capital": v.pct_capital, "lotes": v.lotes,
+                                   "perda_max_rs": v.max_loss_brl} for k, v in b.sizing.items()},
+        "invalidacao": b.invalidation, "confianca": b.confidence, "veredito": b.verdict,
+    }
+
+
+def portfolio(conn) -> dict:
+    """Carteira: posições, gregas líquidas, valor, theta/dia, stress de mercado e
+    faixa de payoff no vencimento. Tudo da tabela real de posições do usuário."""
+    asof = store.get_meta(conn, "asof")
+    poss = store.list_positions(conn)
+    if not poss:
+        return {"asof": asof, "n_posicoes": 0,
+                "mensagem": "A carteira está vazia. Adicione posições (ações ou opções) no módulo "
+                            "Carteira para ver risco líquido, stress e payoff."}
+    positions, nd, ng, nv, nt, tv = [], 0.0, 0.0, 0.0, 0.0, 0.0
+    stress_in, pay_in = [], []
+    for ticker, qty in poss:
+        inst = store.get_instrument(conn, ticker)
+        if inst is None:
+            positions.append({"ticker": ticker, "qty": qty, "obs": "mantida, sem cotação atual"})
+            continue
+        tipo, last = inst["tipo"], inst.get("ultimo")
+        if tipo in ("call", "put"):
+            opt = store.get_option(conn, ticker) or {}
+            mult = 100
+            d, g, v, th = (opt.get("delta") or 0.0, opt.get("gamma") or 0.0,
+                           opt.get("vega") or 0.0, opt.get("theta") or 0.0)
+            uspot = (store.get_instrument(conn, opt.get("underlying") or "") or {}).get("ultimo")
+            strike, entry = opt.get("strike"), opt.get("last") or 0.0
+        else:
+            mult, d, g, v, th, uspot, strike, entry = 1, 1.0, 0.0, 0.0, 0.0, last, None, 0.0
+        pd_, pg, pv, pt = qty * d * mult, qty * g * mult, qty * v * mult, qty * th * mult
+        val = round(qty * last * mult, 2) if last is not None else None
+        nd, ng, nv, nt, tv = nd + pd_, ng + pg, nv + pv, nt + pt, tv + (val or 0.0)
+        positions.append({"ticker": ticker, "tipo": tipo, "qty": qty, "ultimo": _r(last, 2),
+                          "valor": val, "delta": _r(pd_, 4), "theta_dia": _r(pt, 4)})
+        if uspot is not None:
+            stress_in.append((pd_, pg, pv, uspot))
+            if tipo in ("call", "put") and strike is not None:
+                pay_in.append((tipo, strike, uspot, qty, 100, entry))
+            elif tipo not in ("call", "put"):
+                pay_in.append((None, None, last or 0.0, qty, 1, 0.0))
+    pay = [payoff_at_expiry(pay_in, s) for s in payoff_grid()] if pay_in else [0.0]
+    return {
+        "asof": asof, "n_posicoes": len(poss), "valor_total": round(tv, 2), "posicoes": positions,
+        "gregas_liquidas": {"delta": _r(nd, 2), "gamma": _r(ng, 4), "vega": _r(nv, 2),
+                            "theta_dia": _r(nt, 2)},
+        "theta_dia_rs": _r(nt, 2), "pnl_se_vol_sobe_5_pontos": _r(nv * 0.05, 2),
+        "stress_mercado": [{"var_pct": round(s * 100, 1), "pnl": stress_pnl(stress_in, s)}
+                           for s in SPOT_SHOCKS],
+        "payoff_vencimento": {"melhor": _r(max(pay), 2), "pior": _r(min(pay), 2), "faixa": "±30%"},
+    }
+
+
 def solution_overview(conn) -> dict:
     """What ATLAS is + what's in the base (live counts), so the chat can explain
     the solution itself — modules, data coverage, models, most-liquid names."""
@@ -262,8 +410,10 @@ def solution_overview(conn) -> dict:
              "stress de mercado e diagrama de payoff (hoje vs no vencimento)"},
             {"nome": "Analista", "descricao": "briefing honesto por ativo, com os dois lados e "
              "3 perfis de risco"},
-            {"nome": "Chat", "descricao": "este assistente — responde em linguagem natural, "
-             "sempre ancorado nestes mesmos dados reais"},
+            {"nome": "Chat", "descricao": "este assistente — responde em linguagem natural e "
+             "alcança todas as telas: panorama do mercado, screener, cadeia e análise de opções, "
+             "histórico e estrutura a termo de vol, briefing de operação e a sua carteira "
+             "(risco/stress/payoff), sempre ancorado nestes mesmos dados reais"},
         ],
         "dados": {
             "fonte": "COTAHIST EOD (fechamento de mercado, B3)",
@@ -287,6 +437,10 @@ _REGISTRY: dict[str, Callable[..., dict]] = {
     "search_options": search_options,
     "analyze_option": analyze_option,
     "vol_history": vol_history,
+    "market_summary": market_summary,
+    "term_structure": term_structure,
+    "briefing": briefing,
+    "portfolio": portfolio,
     "solution_overview": solution_overview,
 }
 
@@ -363,6 +517,51 @@ TOOL_SCHEMAS: list[dict] = [
             },
             "required": ["ticker"],
         },
+    },
+    {
+        "name": "market_summary",
+        "description": "Panorama do mercado no dia (módulo Radar): quantas ações têm sinal, "
+                       "quantas com vol cara (rico) vs barata (barato), liquidez total e o nível do "
+                       "BOVA11. Use para 'como está o mercado hoje', 'resumo do dia', 'panorama'.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "term_structure",
+        "description": "Estrutura a termo da volatilidade de um subjacente: a IV ATM por vencimento, "
+                       "a inclinação (vol sobe ou cai com o prazo) e o skew. É a 'superfície de "
+                       "volatilidade' do módulo Opções. Use para 'a vol da PETR4 sobe com o prazo?', "
+                       "'como está a estrutura a termo / superfície da VALE3?'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"ticker": {"type": "string", "description": "subjacente, ex: PETR4"}},
+            "required": ["ticker"],
+        },
+    },
+    {
+        "name": "briefing",
+        "description": "Briefing do Analista para um subjacente: monta uma operação real de risco "
+                       "definido (trava de alta vendida / call spread no vencimento mais próximo) e "
+                       "devolve os fatos, os dois lados (a favor/contra), risco-retorno, breakeven, "
+                       "tamanho de posição para 3 perfis (conservador/moderado/agressivo), "
+                       "invalidação e um veredito honesto. Use para 'monte uma operação / um briefing "
+                       "/ uma estratégia para a PETR4', 'que trava dá pra fazer na VALE3?'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "underlying": {"type": "string", "description": "subjacente, ex: PETR4"},
+                "capital": {"type": "number", "description": "capital para o sizing (padrão 50000)"},
+            },
+            "required": ["underlying"],
+        },
+    },
+    {
+        "name": "portfolio",
+        "description": "A carteira do usuário (módulo Carteira): posições, valor total, gregas "
+                       "líquidas (delta/gamma/vega/theta), custo de theta por dia, sensibilidade a "
+                       "+5 pontos de vol, o stress de mercado (P&L de -10% a +10% no spot) e a faixa "
+                       "de payoff no vencimento. Use para 'como está minha carteira', 'qual meu "
+                       "risco', 'meu delta/theta', 'e se o mercado cair 10%'.",
+        "input_schema": {"type": "object", "properties": {}},
     },
     {
         "name": "solution_overview",

@@ -19,6 +19,30 @@ def test_vol_cara_routes_to_ranking(conn):
     assert calls[0]["name"] == "screen_underlyings"
 
 
+def test_carteira_question_routes_to_portfolio(conn):
+    text, calls, _ = fallback.answer("como está minha carteira e meu risco?", conn)
+    assert calls[0]["name"] == "portfolio"
+    assert "carteira" in text.lower()
+
+
+def test_panorama_question_routes_to_market_summary(conn):
+    text, calls, _ = fallback.answer("como está o mercado hoje? me dá um panorama", conn)
+    assert calls[0]["name"] == "market_summary"
+    assert "Panorama" in text
+
+
+def test_briefing_keyword_routes_to_briefing(conn):
+    text, calls, _ = fallback.answer("monte uma operação na PETR4", conn)
+    assert calls[0]["name"] == "briefing"
+    assert "Briefing" in text and "PETR4" in text
+
+
+def test_term_structure_keyword_routes(conn):
+    text, calls, _ = fallback.answer("como está a estrutura a termo da PETR4?", conn)
+    assert calls[0]["name"] == "term_structure"
+    assert "termo" in text.lower()
+
+
 def test_solution_question_routes_to_overview(conn):
     # the exact phrasing from the bug report ("os melhores disponíveis em nossa solução")
     text, calls, _ = fallback.answer("quero saber os melhores disponiveis em nossa solucao", conn)

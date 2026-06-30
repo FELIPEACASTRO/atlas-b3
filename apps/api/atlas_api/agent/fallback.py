@@ -24,6 +24,15 @@ _SOLUTION_WORDS = (
     "disponiv", "disponív", "na base", "nossa", "do sistema", "da plataforma", "no sistema",
     "o que tem", "o que da pra", "o que dá pra", "o que sabe", "módulos", "modulos",
 )
+_BRIEF_WORDS = ("briefing", "trava", "monte uma", "monta uma", "operaç", "estratég", "call spread")
+_TERM_WORDS = ("estrutura a termo", "superfic", "superfíc", " a termo", "sobe com o prazo",
+               "term structure", "smile")
+_PORTFOLIO_WORDS = ("carteira", "minha posi", "minhas posi", "meu risco", "meu portf",
+                    "meu portfólio", "minha exposi", "meu delta", "meu theta", "meu vega",
+                    "meu book", "stress", "payoff")
+_PANORAMA_WORDS = ("panorama", "mercado hoje", "resumo do dia", "como esta o mercado",
+                   "como está o mercado", "como anda o mercado", "visão geral do mercado",
+                   "como esta o dia", "como está o dia")
 _HELP = (
     "Posso responder com os números reais da base (COTAHIST EOD). Exemplos do que entendo agora:\n"
     "• \"como está a PETR4?\" — retrato do ativo (IV, IV Rank, VRP, vol)\n"
@@ -96,6 +105,73 @@ def _solution_text(conn) -> str:
     ])
 
 
+def _panorama_text(conn) -> str:
+    m = tools.market_summary(conn)
+    lines = [
+        f"**Panorama do dia** ({m['asof']}): {m['n_acoes']} ações na base, "
+        f"{m['com_sinal_iv_vs_rv']} com sinal de IV-vs-RV.",
+        f"Vol CARA (IV > RV): {m['vol_cara_rico']} ativos · vol BARATA: {m['vol_barata_barato']} "
+        f"· neutro: {m['neutro']}.",
+    ]
+    if m.get("bova11") is not None:
+        lines.append(f"BOVA11 (ETF do Ibovespa): R$ {_f(m['bova11'])}.")
+    return "\n".join(lines)
+
+
+def _portfolio_text(conn) -> str:
+    p = tools.portfolio(conn)
+    if p.get("n_posicoes", 0) == 0:
+        return p["mensagem"]
+    g = p["gregas_liquidas"]
+    pos = ", ".join(f"{x['ticker']} ({x['qty']:+g})" for x in p["posicoes"][:6])
+    dn = next((s["pnl"] for s in p["stress_mercado"] if s["var_pct"] == -10.0), None)
+    up = next((s["pnl"] for s in p["stress_mercado"] if s["var_pct"] == 10.0), None)
+    return "\n".join([
+        f"**Sua carteira** — {p['n_posicoes']} posições, valor R$ {_f(p['valor_total'])}.",
+        f"Posições: {pos}.",
+        f"Gregas líquidas: Δ {_f(g['delta'])} · Γ {_f(g['gamma'], n=4)} · vega {_f(g['vega'])} "
+        f"· θ/dia R$ {_f(g['theta_dia'], n=0)}.",
+        f"Stress: se o mercado cair 10% → R$ {_f(dn)}; subir 10% → R$ {_f(up)}.",
+        f"Payoff no vencimento (faixa ±30%): melhor R$ {_f(p['payoff_vencimento']['melhor'])}, "
+        f"pior R$ {_f(p['payoff_vencimento']['pior'])}.",
+    ])
+
+
+def _briefing_text(conn, ticker: str) -> str:
+    b = tools.briefing(conn, underlying=ticker)
+    if "error" in b:
+        return b["error"]
+    rr = b["risco_retorno"]
+    mod = b["tamanho_por_perfil"]["moderado"]
+    return "\n".join([
+        f"**Briefing {b['underlying']}** — {b['estrutura']} (perna curta {b['ticker']}).",
+        b["fatos"],
+        f"Risco-retorno: ganho máx R$ {_f(rr['ganho_max_por_lote'])}/lote · "
+        f"perda máx R$ {_f(rr['perda_max_por_lote'])}/lote · breakeven R$ {_f(rr['breakeven'])}.",
+        f"A favor: {b['a_favor'][0] if b['a_favor'] else '—'}",
+        f"Contra: {b['contra'][0] if b['contra'] else '—'}",
+        f"Perfil moderado: {mod['lotes']} lotes (risco R$ {_f(mod['perda_max_rs'])}). "
+        f"Confiança: {b['confianca']}.",
+        b["veredito"],
+    ])
+
+
+def _term_text(conn, ticker: str) -> str:
+    t = tools.term_structure(conn, ticker=ticker)
+    if "error" in t:
+        return t["error"]
+    pts = ", ".join(f"{e['dte']}d {_pct(e['atm_iv'])}" for e in t["estrutura_a_termo"][:5])
+    incl = t.get("inclinacao_termo") or 0.0
+    txt = ("sobe com o prazo (estrutura ascendente)" if incl > 0
+           else "cai com o prazo (descendente)" if incl < 0 else "está plana")
+    return "\n".join([
+        f"**Estrutura a termo de {t['ticker']}** (spot R$ {_f(t['spot'])}): "
+        f"IV ATM por prazo — {pts}.",
+        f"A volatilidade {txt}. Skew {_f(t.get('skew'), n=2)} · "
+        f"razão put/call {_f(t.get('pc_ratio'), n=2)}.",
+    ])
+
+
 def _screen_text(conn, signal: str | None) -> str:
     order = "iv_rank_desc" if signal == "rico" else "iv_rank_asc" if signal == "barato" else "iv_rank_desc"
     res = tools.screen_underlyings(conn, signal=signal, order=order, limit=8)
@@ -120,6 +196,18 @@ def answer(question: str, conn) -> tuple[str, list[dict], str | None]:
             "Configure uma chave gratuita (OpenRouter/Gemini) para perguntas livres.")
 
     tickers = _TICKER_RE.findall(up)
+    underlyings = [t for t in tickers if (store.get_instrument(conn, t) or {}).get("tipo")
+                   in ("acao", "indice")]
+
+    # briefing / operation on an underlying
+    if any(w in ql for w in _BRIEF_WORDS) and underlyings:
+        tool_calls.append({"name": "briefing", "args": {"underlying": underlyings[0]}})
+        return _briefing_text(conn, underlyings[0]), tool_calls, note
+    # term structure / surface on an underlying
+    if any(w in ql for w in _TERM_WORDS) and underlyings:
+        tool_calls.append({"name": "term_structure", "args": {"ticker": underlyings[0]}})
+        return _term_text(conn, underlyings[0]), tool_calls, note
+
     # an explicit option code (it resolves in the options table) -> decision panel
     for t in tickers:
         if store.get_option(conn, t):
@@ -135,6 +223,15 @@ def answer(question: str, conn) -> tuple[str, list[dict], str | None]:
                 tool_calls.append({"name": "search_options",
                                    "args": {"underlying": t, "kind": "call", "order": "cheapest"}})
             return _snapshot_text(conn, t, calls.get("opcoes", [])), tool_calls, note
+
+    # the user's portfolio (no ticker needed)
+    if any(w in ql for w in _PORTFOLIO_WORDS):
+        tool_calls.append({"name": "portfolio", "args": {}})
+        return _portfolio_text(conn), tool_calls, note
+    # market panorama
+    if any(w in ql for w in _PANORAMA_WORDS):
+        tool_calls.append({"name": "market_summary", "args": {}})
+        return _panorama_text(conn), tool_calls, note
 
     # vol cara / barata ranking
     if any(w in ql for w in _CHEAP_WORDS):

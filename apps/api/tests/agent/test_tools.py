@@ -1,4 +1,5 @@
 from atlas_api.agent import tools
+from atlas_api.data import store
 
 
 def test_screen_underlyings_excludes_options_and_carries_signal(conn):
@@ -41,6 +42,40 @@ def test_vol_history_window(conn):
     assert v["n_sessoes"] == 15
     assert v["iv_atual"] >= v["iv_min"] and v["iv_atual"] <= v["iv_max"]
     assert v["iv_rank_janela"] is not None      # latest IV is the max -> ~100
+
+
+def test_market_summary_counts_signals(conn):
+    m = tools.market_summary(conn)
+    assert m["n_acoes"] >= 1 and m["com_sinal_iv_vs_rv"] >= 1
+    assert m["vol_cara_rico"] >= 1  # PETR4 seeded as 'rico'
+
+
+def test_term_structure_atm_iv_by_expiry(conn):
+    t = tools.term_structure(conn, ticker="petr4")
+    assert t["spot"] == 38.3 and t["estrutura_a_termo"]
+    assert t["estrutura_a_termo"][0]["atm_iv"] is not None
+    assert tools.term_structure(conn, ticker="ZZZZ9")["error"]
+
+
+def test_briefing_is_two_sided(conn):
+    b = tools.briefing(conn, underlying="PETR4")
+    assert b["underlying"] == "PETR4" and b["a_favor"] and b["contra"]
+    assert set(b["tamanho_por_perfil"]) == {"conservador", "moderado", "agressivo"}
+    assert "decisão é sua" in b["veredito"].lower()
+    assert b["risco_retorno"]["breakeven"] > 0
+
+
+def test_portfolio_empty_then_populated(conn):
+    assert tools.portfolio(conn)["n_posicoes"] == 0  # carteira vazia -> mensagem
+    store.set_position(conn, "PETR4", 100)
+    conn.commit()
+    p = tools.portfolio(conn)
+    assert p["n_posicoes"] == 1 and p["valor_total"] == 3830.0     # 100 x 38.30
+    assert p["gregas_liquidas"]["delta"] == 100.0                   # stock delta = qty
+    z = next(s for s in p["stress_mercado"] if s["var_pct"] == 0.0)
+    assert z["pnl"] == 0.0
+    up = next(s for s in p["stress_mercado"] if s["var_pct"] == 10.0)
+    assert up["pnl"] == round(100 * 0.10 * 38.3, 2)                 # +383
 
 
 def test_solution_overview_describes_the_base(conn):
