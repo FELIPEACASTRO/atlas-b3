@@ -6,18 +6,18 @@ Tudo sobre o dado real; nada fabricado — quando falta histórico, devolve flag
 from __future__ import annotations
 
 import numpy as np
-from scipy import stats
 
 from atlas_api.pricing.features import skew_25d
 from atlas_api.pricing.har import fit_har, forecast_har
 from atlas_api.pricing.signal import iv_rank
 
-from .conformal import split_conformal
+import math
+
 from .distribution import physical_density, pop, quantiles
 from .forecast import har_leverage, vol_ensemble
 from .regime import regime, strategy_bias
 from .series import neg_return_series, rv_series
-from .validate import coverage, pit_uniformity
+from .validate import pit_uniformity
 
 YZ_WINDOW = 5          # janela do Yang-Zhang rolante (RV diária para o HAR)
 _MONTHLY = 21
@@ -51,39 +51,41 @@ def _term_and_skew(chain: list[dict], spot: float):
     return term_slope, skew
 
 
-def _calibration(rv: list[float], *, min_train: int = 30, alpha: float = 0.2) -> dict:
-    """Backtest HONESTO: walk-forward HAR + envelope conformal; cobertura e PIT no out-of-sample.
+def _calibration(rv: list[float], closes: list[float], *, min_train: int = 26, alpha: float = 0.2) -> dict:
+    """Backtest HONESTO da DENSIDADE SERVIDA contra os retornos diários realizados.
 
-    Série curta → recusa (``available: False``), nunca fabrica. A cobertura conformal é
-    garantida por construção (sanidade); o PIT audita a forma da distribuição.
+    Para cada dia out-of-sample, prevê a vol (HAR, point-in-time), monta a densidade física
+    de 1 dia e checa se o retorno realizado cai no intervalo nominal — e o PIT da CDF. É o que
+    o endpoint de fato entrega (Student-t), não um intervalo separado. Série curta → recusa.
     """
     nominal = round(1.0 - alpha, 3)
-    if len(rv) < min_train + 20:
+    n = len(rv)
+    if n < min_train + 20:
         return {"available": False, "reason": "série curta para backtest robusto", "nominal": nominal}
-    realized, fc = [], []
-    for t in range(min_train, len(rv)):
-        coef = fit_har(rv[:t])
-        realized.append(rv[t])
-        fc.append(forecast_har(coef, rv[:t]))
-    realized = np.asarray(realized, dtype=float)
-    fc = np.asarray(fc, dtype=float)
-    n = len(realized)
-    k = n // 2
-    resid = realized[:k] - fc[:k]
-    s = float(np.std(resid)) or 1e-6
-    lo, hi = split_conformal(
-        realized[:k], fc[:k], np.full(k, s), fc[k:], np.full(n - k, s), alpha=alpha
-    )
-    cov = coverage(realized[k:], lo, hi)
-    pit_vals = stats.norm.cdf((realized[k:] - fc[k:]) / s)
-    p = pit_uniformity(pit_vals)
+    q_lo, q_hi = alpha / 2.0, 1.0 - alpha / 2.0
+    pit_vals: list[float] = []
+    covered: list[bool] = []
+    for i in range(min_train, n):
+        day = i + YZ_WINDOW - 1                 # índice em closes alinhado a rv[i] (fim da janela YZ)
+        if day + 1 >= len(closes):
+            break
+        vol_fc = forecast_har(fit_har(rv[:i]), rv[:i])      # vol 1-passo, point-in-time (sem look-ahead)
+        if not (vol_fc > 0) or closes[day] <= 0:
+            continue
+        dens = physical_density(spot=closes[day], sigma_iv=vol_fc, rv=vol_fc, vrp=0.0, T=1.0 / 252.0)
+        realized = math.log(closes[day + 1] / closes[day])
+        pit_vals.append(float(dens.logret_cdf(realized)))
+        covered.append(bool(dens.logret_ppf(q_lo) <= realized <= dens.logret_ppf(q_hi)))
+    if len(pit_vals) < 20:
+        return {"available": False, "reason": "poucos pontos out-of-sample", "nominal": nominal}
+    p = pit_uniformity(np.asarray(pit_vals, dtype=float))
     return {
         "available": True,
-        "coverage": round(cov, 3),
+        "coverage": round(float(np.mean(covered)), 3),
         "nominal": nominal,
         "pit_p": round(float(p), 3),
         "pit_ok": bool(p > 0.05),
-        "n_test": int(n - k),
+        "n_test": len(pit_vals),
     }
 
 
@@ -143,6 +145,6 @@ def build_prediction(
         "regime": {**reg, "iv_rank": round(ivr, 1) if ivr is not None else None,
                    "term_slope": round(term_slope, 4) if term_slope is not None else None,
                    "skew": round(skew, 4) if skew is not None else None},
-        "calibration": _calibration(rv),
+        "calibration": _calibration(rv, closes),
         "note": "predição calibrada (cenário-alvo + probabilidade), não profecia nem ordem",
     }
