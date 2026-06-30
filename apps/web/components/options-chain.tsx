@@ -136,7 +136,7 @@ export function OptionsChain() {
             </table>
           </div>
           <div className="mt-3 text-[11px] text-[var(--text-tertiary)]">
-            fonte: {prov} · IV/gregas calculadas (BS europeu) · {filtered.length} séries
+            fonte: {prov} · IV/gregas (Bjerksund-Stensland, americana) · {filtered.length} séries
           </div>
         </>
       )}

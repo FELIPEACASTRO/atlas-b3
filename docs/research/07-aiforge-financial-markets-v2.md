@@ -104,7 +104,7 @@ URLs vivas acessadas (brapi.dev) e biases quantificados com o nosso próprio nú
 ## 6. Recomendação (ordem de implementação proposta)
 1. ✅ **FEITO** — **q real por ticker (G4)** + **var_pct D−1 (S7)** via brapi no ingest (commit 7fb1719). Validado: PETR4 q=21,53% → IV ATM 25,5%→31,6%.
 2. ✅ **FEITO** — **Theta (B)** + **IV Rank (A)** na cadeia/screener/Carteira (commit 33fb02f). Validado: 10 calls curtas → net θ/dia +37,8.
-3. **VRP numérico (C)** + **skew/smirk (D)** + **put/call (E)** + **term-slope (F)** — Python puro, inputs já no COTAHIST.
-4. **Stress Δ-Γ-vega na Carteira (G)** — risco que um terminal precisa ter.
-5. **Cross-check de IV vs opcoes.net.br** — fecha a regra anti-análise-falsa.
-6. (Maior) **Americana via Bjerksund–Stensland (G3)** validado contra o CRR; **curva DI**; **VaR/ES (H)**.
+3. ✅ **FEITO** — **VRP numérico (C)** + **put/call (E)** + **skew (D)** por subjacente (commit f08f403).
+4. ✅ **FEITO** — **Stress Δ-Γ-vega na Carteira (G)** (commit f3c6886).
+5. ✅ **FEITO** — **Americana via Bjerksund–Stensland (G3)** validado contra o CRR, ligado no ingest (commit a5e2a62).
+6. Restantes: **term-slope (F)**; **cross-check IV vs opcoes.net.br**; **curva DI** (taxa por prazo); **VaR/ES (H)** — adiado até haver histórico de retornos.

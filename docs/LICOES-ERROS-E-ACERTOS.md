@@ -75,7 +75,9 @@
 - [x] **G4** `dividend yield (q)` real por ticker via **brapi.dev** (`data/brapi.py`), era-correto via asof. **FEITO** — validado: PETR4 q=21,53% (2024) move IV ATM 25,5%→31,6% e delta 0,570→0,500. Resta **G3** (`exercise_style` p/ rotear CRR americano).
 - [x] **S7** `var_pct` verdadeiro D−1 a partir do nosso `prices_daily` (sem dep. externa). **FEITO** — `_pct_change(prev_close, last)`; validado PETR4 −1,25(intraday)→−0,85(D−1).
 - [x] **theta + IV Rank** (varredura AIForge v2): theta/dia em toda opção e na Carteira (net θ/dia); IV Rank (min-max tastytrade) com `iv_daily` acumulando, honestamente None até ≥20 sessões. Validado: 10 calls ATM curtas → net_theta +37,8 R$/dia.
-- [ ] **G3** Obter `exercise_style` por série → rotear CRR p/ americanas (Bjerksund-Stensland valida contra o CRR).
+- [x] **VRP/put-call/skew** por subjacente (tabela `underlying_features`, JOIN no screener) + **stress Δ-Γ-vega** na Carteira (`/portfolio/stress`). Validado ao vivo (short-gamma com concavidade correta).
+- [x] **G3** Opções **americanas** via **Bjerksund-Stensland 1993** (`pricing/american.py`), IV por inversão + gregas FD, validado vs CRR (~3% em 1620 casos). Ligado no ingest (ações = americana). IV americana ≤ europeia; ingest 10,4s p/ ~6300 opções.
+- [ ] **VaR/ES** na Carteira — adiado de propósito: com 3 sessões de histórico seria ruído. Ligar quando o job diário acumular retornos (covariância dos subjacentes).
 - [ ] **G2** Decidir corp_actions: ligar no ex-date ou remover.
 - [ ] **G5/G6** Confirmar convenção de semanais; estender calendário/derivá-lo.
 - [ ] Frontend: consumir `/chain`; empty-state; guards de null; contraste WCAG do texto de proveniência; `asof` no card.
