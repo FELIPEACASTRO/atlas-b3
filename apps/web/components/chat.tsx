@@ -12,6 +12,7 @@ type Msg = {
   provenance?: string;
   asof?: string | null;
   note?: string | null;
+  streaming?: boolean;
 };
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -57,34 +58,79 @@ export function Chat() {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [msgs, busy]);
 
+  // update the assistant message at index `idx` from a streamed SSE event
+  function applyEvent(idx: number, ev: Record<string, unknown>) {
+    setMsgs((cur) => {
+      const copy = cur.slice();
+      const a = { ...copy[idx] };
+      if (ev.type === "delta") {
+        a.content += ev.text as string;
+      } else if (ev.type === "tool") {
+        a.tool_calls = [...(a.tool_calls ?? []), { name: ev.name as string, args: (ev.args ?? {}) as Record<string, unknown> }];
+      } else if (ev.type === "error") {
+        a.content += `${a.content ? "\n" : ""}⚠ ${ev.message as string}`;
+      } else if (ev.type === "done") {
+        a.mode = ev.mode as string;
+        if (Array.isArray(ev.tool_calls)) a.tool_calls = ev.tool_calls as ToolCall[];
+        a.provenance = ev.provenance as string;
+        a.asof = (ev.asof as string) ?? null;
+        a.note = (ev.note as string) ?? null;
+        a.streaming = false;
+      }
+      copy[idx] = a;
+      return copy;
+    });
+  }
+
   async function send(text: string) {
     const q = text.trim();
     if (!q || busy) return;
     setErr("");
     const history = msgs.map((m) => ({ role: m.role, content: m.content }));
-    const next = [...msgs, { role: "user", content: q } as Msg];
+    const next: Msg[] = [
+      ...msgs,
+      { role: "user", content: q },
+      { role: "assistant", content: "", streaming: true },
+    ];
     setMsgs(next);
+    const idx = next.length - 1;
     setInput("");
     setBusy(true);
     try {
-      const r = await fetch(`${API}/chat`, {
+      const r = await fetch(`${API}/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: q, history }),
       });
-      if (!r.ok) {
-        const detail = r.status === 503
+      if (!r.ok || !r.body) {
+        throw new Error(r.status === 503
           ? "sem base de dados carregada — rode a ingestão (ATLAS_DB)"
-          : `erro ${r.status} ao consultar o ATLAS`;
-        throw new Error(detail);
+          : `erro ${r.status} ao consultar o ATLAS`);
       }
-      const d = await r.json();
-      setMsgs([...next, {
-        role: "assistant", content: d.answer, mode: d.mode,
-        tool_calls: d.tool_calls, provenance: d.provenance, asof: d.asof, note: d.note,
-      }]);
+      const reader = r.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split("\n\n");
+        buf = parts.pop() ?? "";
+        for (const part of parts) {
+          const line = part.split("\n").find((l) => l.startsWith("data: "));
+          if (!line) continue;
+          try {
+            applyEvent(idx, JSON.parse(line.slice(6)));
+          } catch {
+            /* ignore a partial/garbled frame */
+          }
+        }
+      }
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "falha na conexão com o ATLAS");
+      const msg = e instanceof Error ? e.message : "falha na conexão com o ATLAS";
+      setErr(msg);
+      applyEvent(idx, { type: "done", mode: "limitado" });
+      applyEvent(idx, { type: "error", message: msg });
     } finally {
       setBusy(false);
     }
@@ -131,11 +177,6 @@ export function Chat() {
             {msgs.map((m, i) => (
               <Bubble key={i} m={m} />
             ))}
-            {busy ? (
-              <div className="flex items-center gap-2 text-[12.5px] text-[var(--text-tertiary)]">
-                <Loader2 size={14} className="animate-spin" style={{ color: "var(--accent)" }} /> consultando a base…
-              </div>
-            ) : null}
             <div ref={endRef} />
           </div>
         )}
@@ -196,11 +237,21 @@ function Bubble({ m }: { m: Msg }) {
       </div>
       <div className="min-w-0 max-w-[84%] space-y-2">
         <div className="rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3.5 py-2.5 text-[13px] leading-relaxed text-[var(--text-secondary)]">
-          {fmt(m.content)}
+          {m.streaming && !m.content ? (
+            <span className="flex items-center gap-2 text-[var(--text-tertiary)]">
+              <Loader2 size={14} className="animate-spin" style={{ color: "var(--accent)" }} /> consultando a base…
+            </span>
+          ) : (
+            <>
+              {fmt(m.content)}
+              {m.streaming ? <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse align-middle" style={{ background: "var(--accent)" }} /> : null}
+            </>
+          )}
         </div>
         {m.note ? (
           <p className="text-[11px]" style={{ color: "var(--accent)" }}>{m.note}</p>
         ) : null}
+        {m.streaming ? null : (
         <div className="flex flex-wrap items-center gap-1.5">
           <span
             className="rounded-md px-1.5 py-0.5 text-[10px]"
@@ -219,6 +270,7 @@ function Bubble({ m }: { m: Msg }) {
             <span className="text-[10px] text-[var(--text-tertiary)]">· {m.provenance}</span>
           ) : null}
         </div>
+        )}
       </div>
     </div>
   );

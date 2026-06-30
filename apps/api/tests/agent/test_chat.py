@@ -62,3 +62,48 @@ def test_orchestrator_falls_back_without_key(conn, monkeypatch):
     res = chat_agent.answer("como está a PETR4?", [], conn=conn)
     assert res.mode == "limitado"
     assert "PETR4" in res.answer and res.tool_calls
+
+
+class _StreamCtx:
+    def __init__(self, texts, final):
+        self._texts, self._final = texts, final
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    @property
+    def text_stream(self):
+        return iter(self._texts)
+
+    def get_final_message(self):
+        return self._final
+
+
+class StubStreamClient:
+    """First stream asks for a tool; second streams the final answer in chunks."""
+
+    def __init__(self):
+        self.n = 0
+        self.messages = self
+
+    def stream(self, **kw):
+        self.n += 1
+        if self.n == 1:
+            return _StreamCtx([], _Resp("tool_use", [
+                _Block(type="tool_use", id="t1", name="vol_history", input={"ticker": "PETR4"})]))
+        return _StreamCtx(["A IV da PETR4 ", "está no topo da janela."],
+                          _Resp("end_turn", [_Block(type="text", text="A IV da PETR4 está no topo da janela.")]))
+
+
+def test_run_stream_emits_tool_then_deltas(conn):
+    events = list(llm.run_stream("a vol da PETR4 está alta?", [], conn=conn, client=StubStreamClient()))
+    kinds = [e["type"] for e in events]
+    assert "tool" in kinds and kinds[-1] == "done"
+    tool_ev = next(e for e in events if e["type"] == "tool")
+    assert tool_ev["name"] == "vol_history" and tool_ev["args"] == {"ticker": "PETR4"}
+    text = "".join(e["text"] for e in events if e["type"] == "delta")
+    assert text == "A IV da PETR4 está no topo da janela."
+    assert events[-1]["tool_calls"] == [{"name": "vol_history", "args": {"ticker": "PETR4"}}]

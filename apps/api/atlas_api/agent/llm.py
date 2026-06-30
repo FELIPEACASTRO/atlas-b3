@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator
 
 from atlas_api.agent import tools
 
@@ -119,3 +120,62 @@ def run(question: str, history: list, *, conn, client=None) -> tuple[str, list[d
 
     return ("Precisei de etapas demais para responder com segurança — refaça a pergunta de forma "
             "mais direta (ex: cite um ticker).", tool_calls)
+
+
+def run_stream(question: str, history: list, *, conn, client=None) -> Iterator[dict]:
+    """Streaming variant of :func:`run`.
+
+    Yields event dicts: ``{"type": "tool", "name", "args"}`` as each tool fires,
+    ``{"type": "delta", "text"}`` for answer chunks, and a final
+    ``{"type": "done", "tool_calls": [...]}``. ``ChatUnavailable`` is raised at
+    setup (before any yield) so the caller can fall back cleanly.
+    """
+    if client is None:
+        if not available():
+            raise ChatUnavailable("sem provedor de IA configurado (ANTHROPIC_API_KEY / pacote anthropic)")
+        import anthropic
+        client = anthropic.Anthropic()
+
+    messages = _to_messages(history, question)
+    tool_calls: list[dict] = []
+
+    for _ in range(MAX_ITERS):
+        with client.messages.stream(
+            model=model(),
+            max_tokens=4096,
+            system=SYSTEM,
+            thinking={"type": "adaptive"},
+            tools=tools.TOOL_SCHEMAS,
+            messages=messages,
+        ) as stream:
+            for text in stream.text_stream:
+                yield {"type": "delta", "text": text}
+            final = stream.get_final_message()
+
+        if getattr(final, "stop_reason", None) == "refusal":
+            yield {"type": "delta", "text": "Não consigo responder a esse pedido específico."}
+            yield {"type": "done", "tool_calls": tool_calls}
+            return
+
+        if final.stop_reason == "tool_use":
+            messages.append({"role": "assistant", "content": final.content})
+            results = []
+            for block in final.content:
+                if getattr(block, "type", None) != "tool_use":
+                    continue
+                args = dict(block.input or {})
+                yield {"type": "tool", "name": block.name, "args": args}
+                out = tools.dispatch(conn, block.name, args)
+                tool_calls.append({"name": block.name, "args": args})
+                results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": json.dumps(out, ensure_ascii=False),
+                })
+            messages.append({"role": "user", "content": results})
+            continue
+
+        yield {"type": "done", "tool_calls": tool_calls}
+        return
+
+    yield {"type": "done", "tool_calls": tool_calls}

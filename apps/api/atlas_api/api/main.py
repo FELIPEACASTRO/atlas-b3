@@ -6,6 +6,7 @@ either way: every row carries provenance + asof.
 """
 from __future__ import annotations
 
+import json
 import math
 import os
 import sqlite3
@@ -14,6 +15,7 @@ from datetime import date, datetime, timezone
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from atlas_api.agent import chat as chat_agent
 from atlas_api.analyst.briefing import Setup, build_briefing
@@ -561,3 +563,31 @@ def chat(req: ChatRequest) -> ChatResponse:
         asof=asof,
         note=res.note,
     )
+
+
+@app.post("/chat/stream")
+def chat_stream(req: ChatRequest) -> StreamingResponse:
+    """Same as /chat, but streamed (SSE): 'tool' / 'delta' events then 'done'.
+
+    Lets the UI render the answer token-by-token and show which tools were
+    consulted as they fire. Grounding is identical — numbers only from tools.
+    """
+    conn = _store_conn()
+    if conn is None:
+        raise HTTPException(status_code=503,
+                            detail="sem dado de mercado — defina ATLAS_DB e rode a ingestão")
+    asof = store.get_meta(conn, "asof")
+    prov = f"COTAHIST EOD {asof}" if asof else "COTAHIST EOD"
+
+    def gen():
+        try:
+            for ev in chat_agent.answer_stream(req.question, req.history, conn=conn):
+                if ev.get("type") == "done":
+                    ev = {**ev, "provenance": prov, "asof": asof}
+                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+        except Exception as e:  # never leak a raw stack into the stream
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        finally:
+            conn.close()
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
