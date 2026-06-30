@@ -25,9 +25,12 @@ from atlas_api.models import (
     RiskRewardOut,
     ScreenerRow,
     SizingOut,
+    StressPoint,
+    StressResponse,
 )
 from atlas_api.pricing.bs import bs_greeks, bs_price
 from atlas_api.pricing.iv import implied_vol
+from atlas_api.pricing.risk import SPOT_SHOCKS, stress_pnl
 from atlas_api.pricing.rv import realized_vol
 
 _FIXTURE = "fixture (sintético) — sem dado real de mercado ainda"
@@ -317,6 +320,42 @@ def portfolio() -> PortfolioSummary:
         net_gamma=round(sum(r.gamma or 0.0 for r in rows), 4),
         net_vega=round(sum(r.vega or 0.0 for r in rows), 2),
         net_theta=round(sum(r.theta or 0.0 for r in rows), 2),
+        provenance=f"COTAHIST EOD {asof}" if asof else "sem dado de mercado",
+        asof=asof or None,
+    )
+
+
+def _stress_inputs(conn) -> list[tuple[float, float, float, float]]:
+    """Per-position (delta, gamma, vega, underlying_spot) for the Taylor stress."""
+    out: list[tuple[float, float, float, float]] = []
+    for ticker, qty in store.list_positions(conn):
+        inst = store.get_instrument(conn, ticker)
+        if inst is None:
+            continue
+        if inst["tipo"] in ("call", "put"):
+            opt = store.get_option(conn, ticker) or {}
+            u = store.get_instrument(conn, opt.get("underlying") or "") or {}
+            spot = u.get("ultimo")
+            if spot is None:
+                continue  # cannot shock without the underlying's spot
+            out.append((qty * (opt.get("delta") or 0.0) * 100, qty * (opt.get("gamma") or 0.0) * 100,
+                        qty * (opt.get("vega") or 0.0) * 100, spot))
+        else:
+            out.append((qty, 0.0, 0.0, inst["ultimo"] or 0.0))  # stock: delta=qty
+    return out
+
+
+@app.get("/portfolio/stress", response_model=StressResponse)
+def portfolio_stress() -> StressResponse:
+    conn = _open_writable()
+    inputs = _stress_inputs(conn)
+    rows = _enrich_positions(conn)
+    asof = store.get_meta(conn, "asof")
+    conn.close()
+    return StressResponse(
+        scenarios=[StressPoint(shock_pct=round(s * 100, 1), pnl=stress_pnl(inputs, s)) for s in SPOT_SHOCKS],
+        pnl_vol_up=round(sum(r.vega or 0.0 for r in rows) * 0.05, 2),  # IV +5 vol points
+        theta_per_day=round(sum(r.theta or 0.0 for r in rows), 2),
         provenance=f"COTAHIST EOD {asof}" if asof else "sem dado de mercado",
         asof=asof or None,
     )

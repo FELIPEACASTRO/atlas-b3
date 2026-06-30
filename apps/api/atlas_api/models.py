@@ -93,3 +93,16 @@ class PortfolioSummary(BaseModel):
     net_theta: float
     provenance: str
     asof: datetime | None = None
+
+
+class StressPoint(BaseModel):
+    shock_pct: float  # uniform spot move applied to each underlying
+    pnl: float        # approximate P&L (delta-gamma), constant vol
+
+
+class StressResponse(BaseModel):
+    scenarios: list[StressPoint]
+    pnl_vol_up: float    # P&L if IV rises +5 vol points (vega leg)
+    theta_per_day: float  # daily decay carried by the book
+    provenance: str
+    asof: datetime | None = None

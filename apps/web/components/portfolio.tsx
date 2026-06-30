@@ -23,6 +23,11 @@ type PF = {
   provenance: string;
   asof: string | null;
 };
+type Stress = {
+  scenarios: { shock_pct: number; pnl: number }[];
+  pnl_vol_up: number;
+  theta_per_day: number;
+};
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -33,6 +38,7 @@ const brl = (n: number | null): string =>
 export function Portfolio() {
   const [rows, setRows] = useState<Pos[]>([]);
   const [pf, setPf] = useState<PF | null>(null);
+  const [stress, setStress] = useState<Stress | null>(null);
   const [ticker, setTicker] = useState("");
   const [qty, setQty] = useState("");
   const [err, setErr] = useState("");
@@ -45,6 +51,10 @@ export function Portfolio() {
     fetch(`${API}/portfolio`)
       .then((r) => (r.ok ? r.json() : null))
       .then(setPf)
+      .catch(() => {});
+    fetch(`${API}/portfolio/stress`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setStress)
       .catch(() => {});
   }
   useEffect(load, []);
@@ -112,6 +122,28 @@ export function Portfolio() {
               <div className="mono text-xl font-medium">{v}</div>
             </div>
           ))}
+        </div>
+      ) : null}
+
+      {stress && stress.scenarios.length ? (
+        <div className="mb-4 rounded-xl border border-[var(--border-subtle)] p-4">
+          <div className="mb-2 text-[12px] text-[var(--text-secondary)]">
+            Stress de mercado (Δ-Γ, vol constante) — P&amp;L aprox. se todos os ativos moverem:
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {stress.scenarios.map((s) => (
+              <div key={s.shock_pct} className="min-w-[72px] rounded-lg bg-[var(--bg-surface)] px-2.5 py-1.5 text-center">
+                <div className="text-[11px] text-[var(--text-tertiary)]">{s.shock_pct > 0 ? "+" : ""}{s.shock_pct}%</div>
+                <div className="mono text-[13px]" style={{ color: s.pnl > 0 ? "var(--up)" : s.pnl < 0 ? "var(--down)" : "var(--text-secondary)" }}>
+                  {brl(s.pnl)}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 text-[11px] text-[var(--text-tertiary)]">
+            IV +5 pts: <span className="mono">{brl(stress.pnl_vol_up)}</span> · θ/dia:{" "}
+            <span className="mono">{brl(stress.theta_per_day)}</span> · aproximação Taylor, não revalorização completa
+          </div>
         </div>
       ) : null}
 

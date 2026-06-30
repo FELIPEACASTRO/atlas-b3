@@ -139,3 +139,19 @@ def test_positions_crud_and_portfolio_risk(tmp_path, monkeypatch):
     assert pf["net_theta"] == round(-5 * -0.03 * 100, 2)
     client.delete("/positions/PETR4")
     assert client.get("/portfolio").json()["n_positions"] == 1
+
+
+def test_portfolio_stress_delta_gamma(tmp_path, monkeypatch):
+    db = str(tmp_path / "st.db")
+    _seed_real_store(db)
+    monkeypatch.setenv("ATLAS_DB", db)
+    client.post("/positions", json={"ticker": "PETR4", "qty": 100})  # 100 shares @ 38.3
+    s = client.get("/portfolio/stress").json()
+    assert len(s["scenarios"]) == 7
+    z = next(p for p in s["scenarios"] if p["shock_pct"] == 0.0)
+    assert z["pnl"] == 0.0
+    up = next(p for p in s["scenarios"] if p["shock_pct"] == 10.0)
+    assert up["pnl"] == round(100 * 0.10 * 38.3, 2)  # stock P&L = qty * dS = +383
+    dn = next(p for p in s["scenarios"] if p["shock_pct"] == -10.0)
+    assert dn["pnl"] == round(100 * -0.10 * 38.3, 2)  # -383
+    client.delete("/positions/PETR4")
