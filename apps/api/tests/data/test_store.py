@@ -36,3 +36,16 @@ def test_reset_preserves_price_history(tmp_path):
     assert len(store.price_history(conn, "X")) == 1  # but the accumulating history survives
     conn.close()
 
+
+def test_reset_preserves_user_positions(tmp_path):
+    # the daily re-ingest (reset) must NOT wipe the user's portfolio
+    db = str(tmp_path / "pos.db")
+    conn = store.connect(db)
+    store.set_position(conn, "PETR4", 1000)
+    store.set_position(conn, "PETRA38", -10)
+    store.insert_instruments(conn, [("X", "acao", 1.5, 0.0, 100.0, None, None, None, "2024-01-02")])
+    store.reset(conn)
+    conn.commit()
+    assert dict(store.list_positions(conn)) == {"PETR4": 1000, "PETRA38": -10}  # book intact
+    conn.close()
+
