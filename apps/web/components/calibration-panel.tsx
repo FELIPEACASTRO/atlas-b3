@@ -25,6 +25,8 @@ type Prediction = {
     nominal: number;
     pit_p?: number;
     pit_ok?: boolean;
+    pit_p_raw?: number;
+    recalibrated?: boolean;
     n_test?: number;
   };
 };
@@ -157,7 +159,7 @@ export function CalibrationPanel({ ticker }: { ticker: string }) {
               style={cal.pit_ok
                 ? { background: "color-mix(in oklch, var(--up) 16%, transparent)", color: "var(--up)" }
                 : { background: "color-mix(in oklch, var(--accent) 16%, transparent)", color: "var(--accent)" }}>
-              {cal.pit_ok ? "forma bem calibrada" : "forma imperfeita (ν fixo)"}
+              {cal.pit_ok ? (cal.recalibrated ? "forma calibrada (recalibrada)" : "forma bem calibrada") : "forma imperfeita (ν fixo)"}
             </span>
           ) : (
             <span className="text-[10px] text-[var(--text-tertiary)]">série curta para auditar</span>
@@ -177,6 +179,11 @@ export function CalibrationPanel({ ticker }: { ticker: string }) {
         ) : (
           <p className="text-[11px] text-[var(--text-tertiary)]">{cal.reason ?? "sem backtest disponível"}</p>
         )}
+        {cal.recalibrated && cal.pit_p_raw != null ? (
+          <p className="mt-1 text-[10.5px] text-[var(--text-tertiary)]">
+            forma recalibrada (isotônica online): teste PIT <span className="mono">{cal.pit_p_raw.toFixed(2)}</span> → <span className="mono" style={{ color: "var(--up)" }}>{cal.pit_p?.toFixed(2)}</span>
+          </p>
+        ) : null}
         <p className="mt-1.5 text-[10.5px] leading-relaxed text-[var(--text-tertiary)]">
           quando o intervalo de {prob(cal.nominal)} cobre ~{prob(cal.nominal)} dos dias e o teste de forma (PIT) passa, a distribuição está honesta — não é acerto garantido, é probabilidade auditada.
         </p>

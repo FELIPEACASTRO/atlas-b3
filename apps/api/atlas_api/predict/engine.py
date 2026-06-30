@@ -5,19 +5,22 @@ Tudo sobre o dado real; nada fabricado — quando falta histórico, devolve flag
 """
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 from atlas_api.pricing.features import skew_25d
 from atlas_api.pricing.har import fit_har, forecast_har
 from atlas_api.pricing.signal import iv_rank
 
-import math
-
-from .distribution import physical_density, pop, quantiles
+from .calibrate import IsotonicRecalibrator, online_recalibrator
+from .distribution import Density, physical_density
 from .forecast import har_leverage, vol_ensemble
 from .regime import regime, strategy_bias
 from .series import neg_return_series, rv_series
 from .validate import pit_uniformity
+
+_RECAL_WINDOW = 60     # janela da recalibração isotônica online (medido: rolante conserta, estático piora)
 
 YZ_WINDOW = 5          # janela do Yang-Zhang rolante (RV diária para o HAR)
 _MONTHLY = 21
@@ -51,17 +54,32 @@ def _term_and_skew(chain: list[dict], spot: float):
     return term_slope, skew
 
 
-def _calibration(rv: list[float], closes: list[float], *, min_train: int = 26, alpha: float = 0.2) -> dict:
-    """Backtest HONESTO da DENSIDADE SERVIDA contra os retornos diários realizados.
+def _recal_pop(dens: Density, target: float, side: str, recal: IsotonicRecalibrator | None) -> float:
+    """POP recalibrada: ``R(CDF)`` corrige a forma quando há recalibrador; senão CDF crua."""
+    cdf = float(dens.logret_cdf(math.log(target / dens.spot)))
+    if recal is not None:
+        cdf = float(recal.apply(cdf))
+    return round((1.0 - cdf) if side == "above" else cdf, 3)
 
-    Para cada dia out-of-sample, prevê a vol (HAR, point-in-time), monta a densidade física
-    de 1 dia e checa se o retorno realizado cai no intervalo nominal — e o PIT da CDF. É o que
-    o endpoint de fato entrega (Student-t), não um intervalo separado. Série curta → recusa.
+
+def _recal_quantile(dens: Density, q: float, recal: IsotonicRecalibrator | None) -> float:
+    """Quantil de preço recalibrado: ``ppf(R⁻¹(q))`` quando há recalibrador; senão ``ppf(q)``."""
+    level = float(recal.inverse(q)) if recal is not None else q
+    return float(dens.spot * math.exp(float(dens.logret_ppf(level))))
+
+
+def _calibration(rv: list[float], closes: list[float], *, min_train: int = 26, alpha: float = 0.2):
+    """Backtest HONESTO da densidade servida + recalibração isotônica ONLINE.
+
+    Para cada dia out-of-sample (point-in-time): prevê a vol (HAR), monta a densidade física
+    de 1 dia, registra o PIT da CDF e se o retorno cai no intervalo nominal. Depois recalibra
+    a forma com janela rolante (medido no dado real: rolante conserta, estático piora). Retorna
+    ``(métricas, recalibrador_para_servir | None)``. Série curta → recusa, nunca fabrica.
     """
     nominal = round(1.0 - alpha, 3)
     n = len(rv)
     if n < min_train + 20:
-        return {"available": False, "reason": "série curta para backtest robusto", "nominal": nominal}
+        return {"available": False, "reason": "série curta para backtest robusto", "nominal": nominal}, None
     q_lo, q_hi = alpha / 2.0, 1.0 - alpha / 2.0
     pit_vals: list[float] = []
     covered: list[bool] = []
@@ -77,16 +95,29 @@ def _calibration(rv: list[float], closes: list[float], *, min_train: int = 26, a
         pit_vals.append(float(dens.logret_cdf(realized)))
         covered.append(bool(dens.logret_ppf(q_lo) <= realized <= dens.logret_ppf(q_hi)))
     if len(pit_vals) < 20:
-        return {"available": False, "reason": "poucos pontos out-of-sample", "nominal": nominal}
-    p = pit_uniformity(np.asarray(pit_vals, dtype=float))
+        return {"available": False, "reason": "poucos pontos out-of-sample", "nominal": nominal}, None
+    pit_arr = np.asarray(pit_vals, dtype=float)
+    raw_p = float(pit_uniformity(pit_arr))
+    # recalibração isotônica ONLINE (janela rolante): R(t) ajustada só no PIT recente, point-in-time
+    recal_pit = [
+        float(IsotonicRecalibrator().fit(pit_arr[t - _RECAL_WINDOW:t]).apply(pit_arr[t]))
+        for t in range(_RECAL_WINDOW, len(pit_arr))
+    ]
+    r_serve = online_recalibrator(pit_arr, window=_RECAL_WINDOW)
+    if len(recal_pit) >= 20 and r_serve is not None:
+        rec = np.asarray(recal_pit, dtype=float)
+        p = float(pit_uniformity(rec))
+        return {
+            "available": True, "recalibrated": True, "nominal": nominal,
+            "coverage": round(float(np.mean((rec >= q_lo) & (rec <= q_hi))), 3),
+            "pit_p": round(p, 3), "pit_ok": bool(p > 0.05),
+            "pit_p_raw": round(raw_p, 3), "n_test": len(rec),
+        }, r_serve
     return {
-        "available": True,
+        "available": True, "recalibrated": False, "nominal": nominal,
         "coverage": round(float(np.mean(covered)), 3),
-        "nominal": nominal,
-        "pit_p": round(float(p), 3),
-        "pit_ok": bool(p > 0.05),
-        "n_test": len(pit_vals),
-    }
+        "pit_p": round(raw_p, 3), "pit_ok": bool(raw_p > 0.05), "n_test": len(pit_vals),
+    }, None
 
 
 def build_prediction(
@@ -114,15 +145,18 @@ def build_prediction(
     sigma_iv = current_iv if current_iv is not None else sigma
     vrp = sigma_iv - sigma
     dens = physical_density(spot=spot, sigma_iv=sigma_iv, rv=sigma, vrp=vrp, T=T_days / 365.0, lam=lam)
+    # calibração + recalibrador isotônico online p/ servir (validado no dado real)
+    cal, r_serve = _calibration(rv, closes)
     pop_targets = [
         {"moneyness": mny, "price": round(spot * mny, 2),
-         "above": round(pop(dens, spot * mny, "above"), 3),
-         "below": round(pop(dens, spot * mny, "below"), 3)}
+         "above": _recal_pop(dens, spot * mny, "above", r_serve),
+         "below": _recal_pop(dens, spot * mny, "below", r_serve)}
         for mny in (0.95, 1.0, 1.05)
     ]
-    qs = quantiles(dens, [0.10, 0.25, 0.50, 0.75, 0.90])
+    qs = [_recal_quantile(dens, q, r_serve) for q in (0.10, 0.25, 0.50, 0.75, 0.90)]
     dist = {
         "sigma_phys": round(dens.sigma, 4), "nu": dens.nu, "horizon_days": T_days,
+        "recalibrated": r_serve is not None,
         "pop_targets": pop_targets,
         "quantiles": {"p10": round(qs[0], 2), "p25": round(qs[1], 2), "p50": round(qs[2], 2),
                       "p75": round(qs[3], 2), "p90": round(qs[4], 2)},
@@ -145,6 +179,6 @@ def build_prediction(
         "regime": {**reg, "iv_rank": round(ivr, 1) if ivr is not None else None,
                    "term_slope": round(term_slope, 4) if term_slope is not None else None,
                    "skew": round(skew, 4) if skew is not None else None},
-        "calibration": _calibration(rv, closes),
+        "calibration": cal,
         "note": "predição calibrada (cenário-alvo + probabilidade), não profecia nem ordem",
     }
