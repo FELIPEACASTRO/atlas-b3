@@ -19,6 +19,16 @@ def test_analysis_is_two_sided_and_labeled():
     assert len(a.gregas) == 4              # delta/gamma/vega/theta explained
 
 
+def test_didactic_sections_present():
+    call = analyze_option(_ctx(kind="call"))
+    assert "sinal" in call.analogia.lower()      # call -> "reserva/sinal" analogy
+    put = analyze_option(_ctx(kind="put", spot=37.5, delta=-0.45))
+    assert "seguro" in put.analogia.lower()      # put -> "insurance" analogy
+    a = analyze_option(_ctx(iv_rank=15.0))
+    assert a.micro and "ponto de empate" in a.micro.lower()   # micro: this contract
+    assert a.macro and "iv rank" in a.macro.lower()           # macro: market regime
+
+
 def test_breakeven_and_max_loss():
     a = analyze_option(_ctx(kind="call", strike=38.0, last=1.10))
     assert a.breakeven == 39.10            # call: strike + premium

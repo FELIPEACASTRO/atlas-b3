@@ -61,6 +61,9 @@ class OptionAnalysis:
     max_perda_titular: float    # premium x100 (per contract)
     custo_theta_dia: float      # |theta| x100 per contract
     resumo: str
+    analogia: str = ""          # day-to-day analogy (insurance / down-payment)
+    micro: str = ""             # this specific contract, in plain words
+    macro: str = ""             # the market regime around it, in plain words
     pros: list[str] = field(default_factory=list)
     contras: list[str] = field(default_factory=list)
     comprar: str = ""
@@ -100,13 +103,60 @@ def analyze_option(c: OptionCtx) -> OptionAnalysis:
     theta_dia = round(abs(c.theta or 0.0) * MULT, 2)
     vrp = round(c.iv - c.rv, 4) if (c.iv is not None and c.rv is not None) else None
 
+    direcao = "subir acima de" if c.kind == "call" else "cair abaixo de"
+    real_hoje, so_tempo = max(intrinsic, 0.0), max(extrinsic, 0.0)
     resumo = (
-        f"{c.ticker} é uma {tipo_label} de {c.underlying} com strike R$ {c.strike:.2f}, "
-        f"{mny} ({mny_txt}), faltando {c.dte} dias para o vencimento ({_dte_label(c.dte)}). "
-        f"O titular aposta na {side} de {c.underlying}; custa R$ {c.last:.2f} por unidade "
-        f"(R$ {max_perda:.0f} por contrato de 100). Destes, R$ {max(intrinsic,0):.2f} é valor "
-        f"intrínseco e R$ {max(extrinsic,0):.2f} é valor de tempo (que derrete até o vencimento)."
+        f"{c.ticker} é uma {tipo_label} de {c.underlying}, com 'gatilho' (strike) em R$ {c.strike:.2f}, "
+        f"{mny_txt}, e vence em {c.dte} dias ({_dte_label(c.dte)}). Quem COMPRA aposta na {side} de {c.underlying}. "
+        f"Custa R$ {c.last:.2f} por unidade (R$ {max_perda:.0f} no lote de 100). Desse preço, "
+        f"R$ {real_hoje:.2f} é 'valor que já vale hoje' e R$ {so_tempo:.2f} é só expectativa/tempo — "
+        f"essa parte vai evaporando aos poucos até o vencimento."
     )
+
+    # day-to-day analogy
+    if c.kind == "call":
+        analogia = (
+            f"Pense como um SINAL para travar um preço: você paga R$ {c.last:.2f} agora pelo DIREITO "
+            f"(sem obrigação) de comprar {c.underlying} a R$ {c.strike:.2f} até {c.venc}. Se {c.underlying} "
+            f"disparar, você 'compra barato' e lucra a diferença; se não subir, perde só o sinal de R$ {c.last:.2f}. "
+            f"É como reservar hoje, por uma taxa, o preço de algo que você acha que vai encarecer."
+        )
+    else:
+        analogia = (
+            f"Pense como um SEGURO: você paga R$ {c.last:.2f} de prêmio e, se {c.underlying} cair abaixo de "
+            f"R$ {c.strike:.2f} até {c.venc}, você é 'indenizado' pela queda (lucra). Se não cair, perde só o "
+            f"prêmio de R$ {c.last:.2f} — como o seguro do carro que, felizmente, você não precisou acionar."
+        )
+
+    micro = (
+        f"No detalhe DESTE contrato: {c.underlying} vale R$ {c.spot:.2f} agora e o gatilho é R$ {c.strike:.2f}. "
+        f"Para a opção valer a pena no fim, {c.underlying} precisa {direcao} R$ {breakeven:.2f} — o 'ponto de empate', "
+        f"onde você não ganha nem perde. Quem compra arrisca no máximo R$ {max_perda:.0f} (o que pagou) e "
+        f"perde cerca de R$ {theta_dia:.0f} por dia só com a passagem do tempo. Faltam {c.dte} dias."
+    )
+
+    if c.iv_rank is None:
+        macro = (f"Sobre o mercado: ainda não há histórico suficiente de {c.underlying} para dizer se as opções "
+                 "estão caras ou baratas em relação ao próprio passado.")
+    else:
+        if c.iv_rank < 30:
+            nivel, opcoes = "baixo (perto da mínima do último ano)", "BARATAS"
+        elif c.iv_rank > 70:
+            nivel, opcoes = "alto (perto da máxima do último ano)", "CARAS"
+        else:
+            nivel, opcoes = "na média do último ano", "com preço normal"
+        vrp_txt = ""
+        if vrp is not None and vrp > 0.03:
+            vrp_txt = (f" O mercado vem 'cobrando' mais nervosismo do que {c.underlying} de fato entregou — "
+                       "isso costuma ajudar quem VENDE opção e atrapalhar quem compra.")
+        elif vrp is not None and vrp < -0.03:
+            vrp_txt = (f" E o mercado vem cobrando MENOS nervosismo do que {c.underlying} entregou — "
+                       "o prêmio parece barato para quem compra.")
+        macro = (
+            f"Sobre o mercado: o 'preço do medo' (a volatilidade) de {c.underlying} está {nivel} — IV Rank "
+            f"{c.iv_rank:.0f} de 100. Em palavras simples, as opções deste ativo estão {opcoes} comparadas à "
+            f"própria história.{vrp_txt}"
+        )
 
     pros: list[str] = []
     contras: list[str] = []
@@ -156,7 +206,6 @@ def analyze_option(c: OptionCtx) -> OptionAnalysis:
         contras.append("Todo trade tem risco: defina antes o que invalida a tese (preço e tempo).")
 
     # --- buy / sell-exit narratives ---
-    direcao = "subir acima de" if c.kind == "call" else "cair abaixo de"
     comprar = (
         f"Comprar (virar TITULAR): você paga R$ {c.last:.2f}/unidade (R$ {max_perda:.0f} por contrato), e essa é a "
         f"sua PERDA MÁXIMA — nada além disso. Para lucrar no vencimento, {c.underlying} precisa {direcao} "
@@ -178,24 +227,24 @@ def analyze_option(c: OptionCtx) -> OptionAnalysis:
         f"cada dia parado custa ~R$ {theta_dia:.0f}/contrato, então segurar opção comprada 'esperando' tem custo."
     )
 
-    # --- greeks, explained in context ---
+    # --- the greeks, in plain words ---
     gregas: list[GreekNote] = []
     if c.delta is not None:
-        gregas.append(GreekNote("Delta (Δ)", f"{c.delta:+.2f}",
-            f"Para cada R$ 1 que {c.underlying} se move, a opção varia ~R$ {abs(c.delta):.2f}. "
-            f"Em módulo, ~{abs(c.delta)*100:.0f}% é uma proxy da 'chance' de terminar no dinheiro."))
+        gregas.append(GreekNote("Acompanha o preço (Delta)", f"{c.delta:+.2f}",
+            f"Se {c.underlying} anda R$ 1, a opção anda cerca de R$ {abs(c.delta):.2f}. "
+            f"Também serve de estimativa da 'chance de dar certo': por volta de {abs(c.delta)*100:.0f}%."))
     if c.gamma is not None:
-        gregas.append(GreekNote("Gamma (Γ)", f"{c.gamma:.4f}",
-            "A velocidade com que o delta muda quando o ativo anda. Alto perto do dinheiro e do vencimento — "
-            "amplifica ganhos e perdas rapidamente."))
+        gregas.append(GreekNote("Aceleração (Gamma)", f"{c.gamma:.4f}",
+            "O quanto esse acompanhamento ACELERA quando o ativo se move. Fica forte perto do vencimento — "
+            "ganhos e perdas podem vir rápido."))
     if c.vega is not None:
-        gregas.append(GreekNote("Vega (ν)", f"{c.vega:.3f}",
-            f"Para cada +1 ponto de volatilidade implícita, a opção ganha ~R$ {c.vega:.2f}. "
-            "Titular ganha se a IV sobe; lançador ganha se a IV cai."))
+        gregas.append(GreekNote("Sensível ao nervosismo (Vega)", f"{c.vega:.3f}",
+            f"Se o 'medo' do mercado (a volatilidade) sobe 1 ponto, a opção ganha ~R$ {c.vega:.2f}. "
+            "Quem comprou torce para o nervosismo subir; quem vendeu, para cair."))
     if c.theta is not None:
-        gregas.append(GreekNote("Theta (Θ/dia)", f"{c.theta:+.4f}",
-            f"Só pela passagem do tempo a opção perde ~R$ {abs(c.theta):.3f}/dia por unidade "
-            f"(R$ {theta_dia:.0f}/contrato). O relógio é inimigo do titular e amigo do lançador."))
+        gregas.append(GreekNote("Custo do tempo (Theta)", f"{c.theta:+.4f}",
+            f"A opção perde ~R$ {abs(c.theta):.3f}/dia (R$ {theta_dia:.0f} no lote) só porque o prazo encurta. "
+            "É o 'aluguel' que o comprador paga e o vendedor recebe."))
 
     veredito = (
         "Isto é análise transparente, não recomendação. Em uma frase: "
@@ -219,6 +268,7 @@ def analyze_option(c: OptionCtx) -> OptionAnalysis:
         moneyness=mny, moneyness_txt=mny_txt, intrinsic=round(intrinsic, 2), extrinsic=round(max(extrinsic, 0), 2),
         iv=c.iv, iv_rank=c.iv_rank, vrp=vrp, breakeven=breakeven,
         max_perda_titular=max_perda, custo_theta_dia=theta_dia,
-        resumo=resumo, pros=pros, contras=contras, comprar=comprar, vender_sair=vender_sair,
+        resumo=resumo, analogia=analogia, micro=micro, macro=macro,
+        pros=pros, contras=contras, comprar=comprar, vender_sair=vender_sair,
         gregas=gregas, veredito=veredito,
     )

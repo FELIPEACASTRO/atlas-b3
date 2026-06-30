@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X, ThumbsUp, ThumbsDown, TrendingUp, HandCoins, Sigma, Scale } from "lucide-react";
+import { X, ThumbsUp, ThumbsDown, TrendingUp, HandCoins, Sigma, Scale, Lightbulb, Microscope, Globe } from "lucide-react";
 
 type Greek = { nome: string; valor: string; explicacao: string };
 type Analysis = {
@@ -10,7 +10,8 @@ type Analysis = {
   moneyness: string; moneyness_txt: string; intrinsic: number; extrinsic: number;
   iv: number | null; iv_rank: number | null; vrp: number | null;
   breakeven: number; max_perda_titular: number; custo_theta_dia: number;
-  resumo: string; pros: string[]; contras: string[]; comprar: string; vender_sair: string;
+  resumo: string; analogia: string; micro: string; macro: string;
+  pros: string[]; contras: string[]; comprar: string; vender_sair: string;
   gregas: Greek[]; veredito: string; provenance: string;
 };
 
@@ -88,6 +89,13 @@ export function OptionPanel({ ticker, onClose }: { ticker: string; onClose: () =
 
             <p className="text-[13px] leading-relaxed text-[var(--text-secondary)]">{a.resumo}</p>
 
+            <div className="rounded-xl p-3" style={{ background: "color-mix(in oklch, var(--accent) 9%, transparent)" }}>
+              <div className="mb-1 flex items-center gap-1.5 text-[12px]" style={{ color: "var(--accent)" }}>
+                <Lightbulb size={13} /> Em palavras simples
+              </div>
+              <p className="text-[12.5px] leading-relaxed" style={{ color: "var(--text-primary)" }}>{a.analogia}</p>
+            </div>
+
             <div className="grid grid-cols-3 gap-2">
               <Stat label="Strike" value={`R$ ${a.strike.toFixed(2)}`} />
               <Stat label={`Spot ${a.underlying}`} value={`R$ ${a.spot.toFixed(2)}`} />
@@ -98,6 +106,19 @@ export function OptionPanel({ ticker, onClose }: { ticker: string; onClose: () =
               <Stat label="Intrínseco" value={`R$ ${a.intrinsic.toFixed(2)}`} />
               <Stat label="Valor de tempo" value={`R$ ${a.extrinsic.toFixed(2)}`} />
               <Stat label="Perda máx (titular)" value={brl(a.max_perda_titular)} tint="var(--down)" />
+            </div>
+
+            <div className="rounded-xl border border-[var(--border-subtle)] p-3">
+              <div className="mb-1 flex items-center gap-1.5 text-[12px] text-[var(--text-secondary)]">
+                <Microscope size={13} /> No detalhe (esta opção)
+              </div>
+              <p className="text-[12.5px] leading-relaxed text-[var(--text-secondary)]">{a.micro}</p>
+            </div>
+            <div className="rounded-xl border border-[var(--border-subtle)] p-3">
+              <div className="mb-1 flex items-center gap-1.5 text-[12px] text-[var(--text-secondary)]">
+                <Globe size={13} /> No mercado (visão geral)
+              </div>
+              <p className="text-[12.5px] leading-relaxed text-[var(--text-secondary)]">{a.macro}</p>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">

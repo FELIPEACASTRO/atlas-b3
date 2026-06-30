@@ -183,6 +183,9 @@ class OptionAnalysisOut(BaseModel):
     max_perda_titular: float
     custo_theta_dia: float
     resumo: str
+    analogia: str
+    micro: str
+    macro: str
     pros: list[str]
     contras: list[str]
     comprar: str
