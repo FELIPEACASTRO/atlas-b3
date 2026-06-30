@@ -102,8 +102,9 @@ URLs vivas acessadas (brapi.dev) e biases quantificados com o nosso próprio nú
 ---
 
 ## 6. Recomendação (ordem de implementação proposta)
-1. **q real por ticker (G4)** + **var_pct D−1 (S7)** via brapi no ingest — viés já quantificado, fonte grátis.
-2. **Theta (B)** + **IV Rank (A)** + **VRP numérico (C)** — núcleo do valor p/ vendedor de prêmio, Python puro.
-3. **Stress Δ-Γ-vega na Carteira (G)** — risco que um terminal precisa ter.
-4. **Cross-check de IV vs opcoes.net.br** — fecha a regra anti-análise-falsa.
-5. (Maior) **Americana via Bjerksund–Stensland (G3)** validado contra o CRR; **curva DI**; **VaR/ES (H)**.
+1. ✅ **FEITO** — **q real por ticker (G4)** + **var_pct D−1 (S7)** via brapi no ingest (commit 7fb1719). Validado: PETR4 q=21,53% → IV ATM 25,5%→31,6%.
+2. ✅ **FEITO** — **Theta (B)** + **IV Rank (A)** na cadeia/screener/Carteira (commit 33fb02f). Validado: 10 calls curtas → net θ/dia +37,8.
+3. **VRP numérico (C)** + **skew/smirk (D)** + **put/call (E)** + **term-slope (F)** — Python puro, inputs já no COTAHIST.
+4. **Stress Δ-Γ-vega na Carteira (G)** — risco que um terminal precisa ter.
+5. **Cross-check de IV vs opcoes.net.br** — fecha a regra anti-análise-falsa.
+6. (Maior) **Americana via Bjerksund–Stensland (G3)** validado contra o CRR; **curva DI**; **VaR/ES (H)**.

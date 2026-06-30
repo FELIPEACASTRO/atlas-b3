@@ -72,8 +72,10 @@
 - [x] **G1** Persistir histórico de closes e computar RV → ligar `iv_vs_rv`. **FEITO** — store `prices_daily` não-destrutivo; sinal IV-vs-RV (ATM IV vs RV) validado em 3 pregões reais (150 ações com sinal). Taxa BCB-SGS ligada.
 - [x] **S9** Gate econômico de IV (extrínseco + banda de plausibilidade). **FEITO** — re-ingerido no DB ao vivo. Resíduo disclosed: IVs deep-ITM até ~272% permanecem (extrínseco real, porém ruidoso); o corte 300% é heurística documentada, não modelo. Aprofundar exigiria filtro por banda de delta (decisão de produto).
 - [x] **Carteira** (4º módulo): posições ações+opções, gregas líquidas (Δ/Γ/vega) agregadas da tabela real de opções; `/positions` CRUD + `/portfolio`. Validado ao vivo (PETR4 long + put curta → Δ líquido coerente).
-- [ ] **G3/G4** Obter `exercise_style` e `dividend yield (q)` por série → rotear CRR p/ americanas e `q` real.
-- [ ] **S7** Persistir close D−1 → `var_pct` verdadeiro.
+- [x] **G4** `dividend yield (q)` real por ticker via **brapi.dev** (`data/brapi.py`), era-correto via asof. **FEITO** — validado: PETR4 q=21,53% (2024) move IV ATM 25,5%→31,6% e delta 0,570→0,500. Resta **G3** (`exercise_style` p/ rotear CRR americano).
+- [x] **S7** `var_pct` verdadeiro D−1 a partir do nosso `prices_daily` (sem dep. externa). **FEITO** — `_pct_change(prev_close, last)`; validado PETR4 −1,25(intraday)→−0,85(D−1).
+- [x] **theta + IV Rank** (varredura AIForge v2): theta/dia em toda opção e na Carteira (net θ/dia); IV Rank (min-max tastytrade) com `iv_daily` acumulando, honestamente None até ≥20 sessões. Validado: 10 calls ATM curtas → net_theta +37,8 R$/dia.
+- [ ] **G3** Obter `exercise_style` por série → rotear CRR p/ americanas (Bjerksund-Stensland valida contra o CRR).
 - [ ] **G2** Decidir corp_actions: ligar no ex-date ou remover.
 - [ ] **G5/G6** Confirmar convenção de semanais; estender calendário/derivá-lo.
 - [ ] Frontend: consumir `/chain`; empty-state; guards de null; contraste WCAG do texto de proveniência; `asof` no card.
