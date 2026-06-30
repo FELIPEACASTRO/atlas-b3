@@ -9,6 +9,30 @@ from atlas_api.pricing.american import (
 from atlas_api.pricing.bs import bs_price
 
 
+def test_deep_itm_negative_carry_never_below_intrinsic():
+    # regression: the old beta>60 guard returned the European value (far below
+    # intrinsic) for deep-ITM negative-carry options, underpricing 40-98%.
+    # A plain American put on a non-dividend stock at the Selic rate must be >= 25.
+    cases = [
+        ("put", 75.0, 100.0, 0.105, 0.0, 1.0, 0.05),    # ~25 intrinsic
+        ("call", 110.0, 100.0, 0.105, 0.20, 1.0, 0.05),  # ~10 intrinsic (q > r)
+        ("call", 110.0, 100.0, 0.05, 0.30, 1.0, 0.09),   # ~10 intrinsic
+    ]
+    for kind, S, K, r, q, T, sigma in cases:
+        intrinsic = max(0.0, S - K) if kind == "call" else max(0.0, K - S)
+        price = bjerksund_stensland(kind, S, K, r, q, T, sigma)
+        crr = crr_price(kind, S, K, r, q, T, sigma, steps=600)
+        assert price >= intrinsic - 1e-6, (kind, S, K, price, intrinsic)
+        assert abs(price - crr) <= 0.05 * max(crr, 1.0), (kind, price, crr)
+
+
+def test_american_iv_nan_at_intrinsic_plateau():
+    # on the immediate-exercise plateau the American value is flat in sigma, so a
+    # quote at intrinsic has no implied vol — must be nan, not a fabricated number.
+    intrinsic = 130.0 - 100.0
+    assert math.isnan(american_iv("call", intrinsic, 130.0, 100.0, 0.05, 0.30, 0.5))
+
+
 def test_bjerksund_agrees_with_crr_binomial():
     # the closed-form American price must track the binomial ground truth
     worst = 0.0

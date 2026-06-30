@@ -40,16 +40,17 @@ def _bs_call(S: float, K: float, r: float, b: float, T: float, sigma: float) -> 
         return _euro_call_carry(S, K, r, b, T, sigma)
     sigsq = sigma * sigma
     beta = (0.5 - b / sigsq) + math.sqrt((b / sigsq - 0.5) ** 2 + 2.0 * r / sigsq)
-    # at very low vol beta ~ 1/sigma^2 and S**beta overflows; the early-exercise
-    # premium is then negligible, so fall back to the European value.
-    if beta > 60.0:
-        return _euro_call_carry(S, K, r, b, T, sigma)
     b_inf = beta / (beta - 1.0) * K
     b0 = max(K, r / (r - b) * K)
-    ht = -(b * T + 2.0 * sigma * math.sqrt(T)) * b0 / (b_inf - b0)
-    trigger = b0 + (b_inf - b0) * (1.0 - math.exp(ht))
+    # exp(ht) can overflow only at extreme beta (very low vol, negative carry); there
+    # the early-exercise region dominates and S >= trigger returns intrinsic below.
+    try:
+        exp_ht = math.exp(-(b * T + 2.0 * sigma * math.sqrt(T)) * b0 / (b_inf - b0))
+    except OverflowError:
+        exp_ht = math.inf
+    trigger = b0 + (b_inf - b0) * (1.0 - exp_ht)
     if S >= trigger:
-        return S - K  # immediate exercise
+        return S - K  # immediate exercise — the DOMINANT value for deep-ITM negative carry
     alpha = (trigger - K) * trigger ** (-beta)
     try:
         return (
@@ -61,7 +62,8 @@ def _bs_call(S: float, K: float, r: float, b: float, T: float, sigma: float) -> 
             + K * _phi(S, T, 0.0, K, trigger, r, b, sigma)
         )
     except OverflowError:
-        return _euro_call_carry(S, K, r, b, T, sigma)
+        # genuine overflow only at extreme beta — never report below intrinsic
+        return max(_euro_call_carry(S, K, r, b, T, sigma), S - K)
 
 
 def bjerksund_stensland(kind: str, S: float, K: float, r: float, q: float, T: float, sigma: float) -> float:
@@ -98,7 +100,9 @@ def american_iv(kind: str, price: float, S: float, K: float, r: float, q: float,
     if price <= 0 or T <= 0 or S <= 0 or K <= 0:
         return float("nan")
     intrinsic = max(0.0, S - K) if kind == "call" else max(0.0, K - S)
-    if price < intrinsic - 1e-8:
+    # at/under intrinsic the American value is flat in sigma -> IV is undefined; don't
+    # let bisection return an arbitrary point on the immediate-exercise plateau.
+    if price <= intrinsic + 1e-7:
         return float("nan")
     f_lo = bjerksund_stensland(kind, S, K, r, q, T, _IV_LOW) - price
     f_hi = bjerksund_stensland(kind, S, K, r, q, T, _IV_HIGH) - price

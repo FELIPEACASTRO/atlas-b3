@@ -27,7 +27,7 @@ class Setup:
     max_gain_per_lot: float
     max_loss_per_lot: float
     breakeven: float
-    delta: float
+    delta: float | None        # None when the leg has no reliable stored delta
     liquidity_brl: float
     dte: int
     capital: float
@@ -83,9 +83,10 @@ def build_briefing(s: Setup) -> Briefing:
     label = classify(s.iv, s.rv)
     is_short_vol = s.structure in _SHORT_VOL
 
+    delta_txt = f"|Δ| {abs(s.delta):.2f}, " if s.delta is not None else ""
     setup_facts = (
         f"{s.underlying}: IV {s.iv:.0%} vs RV {s.rv:.0%} ({label}); "
-        f"liquidez R$ {s.liquidity_brl / 1e6:.0f} mi, |Δ| {abs(s.delta):.2f}, "
+        f"liquidez R$ {s.liquidity_brl / 1e6:.0f} mi, {delta_txt}"
         f"{s.dte} dias até o vencimento."
     )
 

@@ -20,6 +20,7 @@ from fastapi.responses import StreamingResponse
 from atlas_api.agent import chat as chat_agent
 from atlas_api.analyst.briefing import Setup, build_briefing
 from atlas_api.analyst.option_analysis import OptionCtx, analyze_option
+from atlas_api.analyst.setups import call_spread_briefing
 from atlas_api.data import store
 from atlas_api.models import (
     BriefingResponse,
@@ -149,43 +150,13 @@ def briefing(underlying: str, capital: float = 50000.0) -> BriefingResponse:
     conn = _store_conn()
     if conn is None:
         raise HTTPException(status_code=503, detail="sem store real — defina ATLAS_DB e ingira COTAHIST")
-    stocks = [r for r in store.query_screener(conn, tipo="acao", min_liq=0, limit=10000)
-              if r["ticker"] == underlying]
-    closes = [c for (_o, _h, _l, c) in store.price_history(conn, underlying)]
-    chain = store.query_chain(conn, underlying)
     asof = store.get_meta(conn, "asof") or ""
-    conn.close()
-
-    if not stocks:
-        raise HTTPException(status_code=404, detail=f"{underlying} não encontrado")
-    spot = stocks[0]["ultimo"]
-    rv = realized_vol(closes) if len(closes) >= 3 else float("nan")
-    calls = [o for o in chain if o["kind"] == "call" and o["iv"] is not None and o["strike"] and o["venc"]]
-    if spot is None or rv != rv or len(calls) < 2:
-        raise HTTPException(status_code=422,
-                            detail=f"dados insuficientes para briefing de {underlying} (precisa RV + cadeia de calls)")
-
-    near_venc = min(o["venc"] for o in calls)
-    near = sorted((o for o in calls if o["venc"] == near_venc), key=lambda o: o["strike"])
-    i = min(range(len(near)), key=lambda k: abs(near[k]["strike"] - spot))
-    if i + 1 >= len(near):
-        i = len(near) - 2
-    short_leg, long_leg = near[i], near[i + 1]
-    width = long_leg["strike"] - short_leg["strike"]
-    credit = short_leg["last"] - long_leg["last"]
-    dte = (date.fromisoformat(near_venc) - date.fromisoformat(asof)).days if asof else 21
-
-    setup = Setup(
-        ticker=short_leg["ticker"], underlying=underlying, structure="trava_alta_vendida",
-        iv=short_leg["iv"], rv=round(rv, 4),
-        max_gain_per_lot=round(max(credit, 0.0), 2),
-        max_loss_per_lot=round(max(width - credit, 0.01), 2),
-        breakeven=round(short_leg["strike"] + credit, 2),
-        delta=short_leg["delta"] or 0.3,
-        liquidity_brl=stocks[0]["liquidez"] or 0.0,
-        dte=max(dte, 1), capital=capital,
-    )
-    b = build_briefing(setup)
+    try:
+        b, err = call_spread_briefing(conn, underlying, capital=capital)
+    finally:
+        conn.close()
+    if err:
+        raise HTTPException(status_code=404 if "não encontrado" in err else 422, detail=err)
     return BriefingResponse(
         ticker=b.ticker, setup_facts=b.setup_facts, case_for=b.case_for, case_against=b.case_against,
         risk_reward=RiskRewardOut(**vars(b.risk_reward)),
@@ -473,10 +444,10 @@ def portfolio_stress() -> StressResponse:
 
 
 def _payoff_inputs(conn, asof: str | None) -> list[tuple]:
-    """Per-position (kind, strike, spot, qty, mult, entry, iv, T) for the payoff.
+    """Per-position (kind, strike, spot, qty, mult, entry, iv, T, delta) for the payoff.
 
     iv/T let the 'today' curve be a full revaluation (exact, no Taylor divergence);
-    None for a stock leg.
+    ``delta`` is the linear fallback when IV/T are missing. None for a stock leg.
     """
     asof_d = date.fromisoformat(asof) if asof else None
     out: list[tuple] = []
@@ -491,9 +462,10 @@ def _payoff_inputs(conn, asof: str | None) -> list[tuple]:
             if spot is None or opt.get("strike") is None:
                 continue
             t = year_fraction(asof_d, date.fromisoformat(opt["venc"])) if (asof_d and opt.get("venc")) else None
-            out.append((inst["tipo"], opt["strike"], spot, qty, 100, opt.get("last") or 0.0, opt.get("iv"), t))
+            out.append((inst["tipo"], opt["strike"], spot, qty, 100,
+                        opt.get("last") or 0.0, opt.get("iv"), t, opt.get("delta")))
         else:
-            out.append((None, None, inst["ultimo"] or 0.0, qty, 1, 0.0, None, None))  # stock leg
+            out.append((None, None, inst["ultimo"] or 0.0, qty, 1, 0.0, None, None, None))  # stock leg
     return out
 
 
@@ -502,17 +474,23 @@ def _payoff_now(positions: list[tuple], shock: float, r: float) -> float:
 
     Options are repriced with Bjerksund-Stensland at the bumped spot (same IV/T);
     the difference is exactly 0 at shock 0 and captures convexity without Taylor
-    divergence. Falls back to delta-only if IV/T are unavailable.
+    divergence. When IV/T are unavailable (IV suppressed by the reliability gate),
+    it falls back to a linear delta approximation rather than silently flatlining
+    that leg; a leg with neither IV nor delta contributes 0 (and is, honestly,
+    unknown today).
     """
     total = 0.0
-    for kind, strike, spot, qty, mult, _entry, iv, t in positions:
+    for kind, strike, spot, qty, mult, _entry, iv, t, delta in positions:
         s2 = (spot or 0.0) * (1.0 + shock)
+        ds = s2 - (spot or 0.0)
         if kind is None:
-            total += (qty or 0.0) * (s2 - (spot or 0.0))
+            total += (qty or 0.0) * ds
         elif iv and t and t > 0:
             v2 = bjerksund_stensland(kind, s2, strike, r, 0.0, t, iv)
             v0 = bjerksund_stensland(kind, spot, strike, r, 0.0, t, iv)
             total += (qty or 0.0) * mult * (v2 - v0)
+        elif delta is not None:  # IV/T missing -> linear delta fallback (documented)
+            total += (qty or 0.0) * mult * delta * ds
     return round(total, 2)
 
 

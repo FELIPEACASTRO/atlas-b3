@@ -15,9 +15,9 @@ import math
 from datetime import date
 from typing import Any, Callable
 
-from atlas_api.analyst.briefing import Setup, build_briefing
 from atlas_api.analyst.option_analysis import OptionCtx
 from atlas_api.analyst.option_analysis import analyze_option as _analyze_option
+from atlas_api.analyst.setups import call_spread_briefing
 from atlas_api.data import store
 from atlas_api.pricing.risk import SPOT_SHOCKS, payoff_at_expiry, payoff_grid, stress_pnl
 from atlas_api.pricing.rv import realized_vol
@@ -295,36 +295,14 @@ def term_structure(conn, *, ticker: str) -> dict:
 
 def briefing(conn, *, underlying: str, capital: float = 50000.0) -> dict:
     """Briefing do Analista: monta uma trava de alta vendida (call spread) real do
-    vencimento mais próximo e devolve os dois lados + sizing para 3 perfis."""
-    underlying = (underlying or "").upper().strip()
-    stocks = [r for r in store.query_screener(conn, limit=10000) if r["ticker"] == underlying]
-    if not stocks:
-        return {"error": f"{underlying} não encontrado na base."}
-    spot = stocks[0].get("ultimo")
-    closes = [c for (_d, c) in store.close_series(conn, underlying)]
-    chain = store.query_chain(conn, underlying)
+    vencimento mais próximo e devolve os dois lados + sizing para 3 perfis.
+
+    Usa o MESMO motor do endpoint /briefing (analyst.setups) — a tela e o chat
+    nunca divergem para o mesmo ticker."""
+    b, err = call_spread_briefing(conn, underlying, capital=capital)
+    if err:
+        return {"error": err}
     asof = store.get_meta(conn, "asof")
-    rv = realized_vol(closes) if len(closes) >= 3 else float("nan")
-    calls = [o for o in chain if o["kind"] == "call" and o.get("iv") is not None
-             and o.get("strike") and o.get("venc")]
-    if spot is None or rv != rv or len(calls) < 2:
-        return {"error": f"dados insuficientes para um briefing de {underlying} "
-                         "(precisa de vol realizada + cadeia de calls com IV)."}
-    near_venc = min(o["venc"] for o in calls)
-    near = sorted((o for o in calls if o["venc"] == near_venc), key=lambda o: o["strike"])
-    i = min(range(len(near)), key=lambda k: abs(near[k]["strike"] - spot))
-    if i + 1 >= len(near):
-        i = len(near) - 2
-    short_leg, long_leg = near[i], near[i + 1]
-    width = long_leg["strike"] - short_leg["strike"]
-    credit = short_leg["last"] - long_leg["last"]
-    dte = _dte(near_venc, asof) or 21
-    b = build_briefing(Setup(
-        ticker=short_leg["ticker"], underlying=underlying, structure="trava_alta_vendida",
-        iv=short_leg["iv"], rv=round(rv, 4), max_gain_per_lot=round(max(credit, 0.0), 2),
-        max_loss_per_lot=round(max(width - credit, 0.01), 2),
-        breakeven=round(short_leg["strike"] + credit, 2), delta=short_leg.get("delta") or 0.3,
-        liquidity_brl=stocks[0].get("liquidez") or 0.0, dte=max(dte, 1), capital=capital))
     return {
         "asof": asof, "ticker": b.ticker, "underlying": underlying,
         "estrutura": "trava de alta vendida (call spread de crédito), vencimento mais próximo",
