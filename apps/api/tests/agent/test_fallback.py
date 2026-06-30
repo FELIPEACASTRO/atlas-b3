@@ -43,6 +43,26 @@ def test_term_structure_keyword_routes(conn):
     assert "termo" in text.lower()
 
 
+def test_table_columns_question_routes_to_guide(conn):
+    # the exact bug-report question: it must explain the columns, not just IV/VRP rows
+    text, calls, _ = fallback.answer(
+        "o que significa IV vs RV na tabela da tela screener, quero saber os valores dessa tabela", conn)
+    assert calls[0]["name"] == "screen_guide"
+    assert "VRP" in text and "IV Rank" in text and "Liquidez" in text
+
+
+def test_concept_question_routes_to_glossary(conn):
+    text, calls, _ = fallback.answer("o que é skew?", conn)
+    assert calls[0]["name"] == "glossary"
+    assert "Skew" in text and "prática" in text.lower()
+
+
+def test_what_is_atlas_still_goes_to_solution_not_glossary(conn):
+    # "o que é o atlas" triggers the glossary phrase but has no concept -> solution_overview
+    text, calls, _ = fallback.answer("o que é o atlas?", conn)
+    assert calls[0]["name"] == "solution_overview"
+
+
 def test_solution_question_routes_to_overview(conn):
     # the exact phrasing from the bug report ("os melhores disponíveis em nossa solução")
     text, calls, _ = fallback.answer("quero saber os melhores disponiveis em nossa solucao", conn)

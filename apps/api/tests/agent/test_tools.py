@@ -87,6 +87,23 @@ def test_solution_overview_describes_the_base(conn):
     assert "Bjerksund" in s["cobertura"] and "IBOV" in s["cobertura"]
 
 
+def test_screen_guide_lists_columns(conn):
+    g = tools.screen_guide(conn, tela="screener")
+    campos = [c["campo"] for c in g["colunas"]]
+    assert any("IV Rank" in c for c in campos) and any("VRP" in c for c in campos)
+    assert any("Skew" in c for c in campos) and any("Liquidez" in c for c in campos)
+    assert tools.screen_guide(conn)["telas"]                       # index of every screen
+    assert tools.screen_guide(conn, tela="inexistente")["error"]
+
+
+def test_glossary_defines_terms(conn):
+    g = tools.glossary(conn, termo="iv rank")
+    assert g["resultados"] and "IV Rank" in g["resultados"][0]["termo"]
+    assert "na_pratica" in g["resultados"][0]                       # has the practical nuance
+    assert tools.glossary(conn)["termos"]                           # full index
+    assert tools.glossary(conn, termo="xyzzy")["error"]
+
+
 def test_dispatch_unknown_and_bad_args_never_raise(conn):
     assert "error" in tools.dispatch(conn, "nope", {})
     assert "error" in tools.dispatch(conn, "underlying_snapshot", {"bogus": 1})

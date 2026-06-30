@@ -429,6 +429,166 @@ def solution_overview(conn) -> dict:
     }
 
 
+_SCREEN_GUIDE: dict[str, dict] = {
+    "screener": {
+        "tela": "Radar / Screener",
+        "para_que_serve": "achar oportunidades varrendo o mercado por volatilidade, sinal e liquidez",
+        "colunas": [
+            {"campo": "Ticker / Tipo", "significa": "código do ativo e se é ação, índice ou opção"},
+            {"campo": "Último", "significa": "preço de fechamento do dia (EOD)",
+             "como_ler": "não é tempo real — é o último negócio do pregão"},
+            {"campo": "Variação %", "significa": "variação do dia frente ao fechamento anterior (D−1)"},
+            {"campo": "Liquidez", "significa": "volume financeiro negociado no dia (R$)",
+             "como_ler": "alta = entra/sai fácil, spread menor; evite ilíquidos"},
+            {"campo": "IV", "significa": "volatilidade implícita ATM — o 'nervosismo' que o mercado "
+             "precifica para a frente, em % ao ano"},
+            {"campo": "Sinal IV-vs-RV", "significa": "rico (IV>RV, vol cara), barato (IV<RV, vol "
+             "barata) ou neutro", "como_ler": "heurística rotulada, NÃO recomendação"},
+            {"campo": "IV Rank", "significa": "0–100: onde a IV de hoje está no histórico de ~1 ano",
+             "como_ler": ">80 vol historicamente alta (cara); <20 baixa (barata)"},
+            {"campo": "VRP", "significa": "IV − RV, o prêmio de risco de volatilidade",
+             "como_ler": ">0 o mercado cobra mais do que o ativo andou de fato"},
+            {"campo": "Razão Put/Call", "significa": "volume de puts ÷ calls",
+             "como_ler": ">1 mais proteção/pessimismo; <1 mais aposta de alta"},
+            {"campo": "Skew", "significa": "assimetria do sorriso de volatilidade (puts OTM vs "
+             "calls OTM) — quanto o mercado paga a mais por proteção"},
+        ],
+    },
+    "opcoes": {
+        "tela": "Opções — cadeia",
+        "para_que_serve": "ver todas as séries de um ativo com preço, IV e gregas",
+        "colunas": [
+            {"campo": "Strike", "significa": "preço de exercício combinado da opção"},
+            {"campo": "Tipo", "significa": "call (direito de comprar) ou put (direito de vender)"},
+            {"campo": "Último / Prêmio", "significa": "preço da opção (o que você paga/recebe)"},
+            {"campo": "IV", "significa": "volatilidade implícita daquela série"},
+            {"campo": "Delta", "significa": "quanto a opção anda quando o ativo anda R$1 (≈ prob. de "
+             "terminar ITM)"},
+            {"campo": "Gamma", "significa": "quão rápido o delta muda — a 'aceleração'"},
+            {"campo": "Vega", "significa": "sensibilidade ao nervosismo: quanto ganha/perde se a IV sobe 1 ponto"},
+            {"campo": "Theta", "significa": "custo do tempo por dia — quanto o prêmio derrete por dia"},
+        ],
+    },
+    "superficie": {
+        "tela": "Opções — superfície de volatilidade",
+        "para_que_serve": "ver a IV por prazo (estrutura a termo) e por strike (smile)",
+        "colunas": [
+            {"campo": "Estrutura a termo", "significa": "IV ATM por vencimento",
+             "como_ler": "ascendente = vol sobe com o prazo (calmaria curta, incerteza longa)"},
+            {"campo": "Smile × prazo (heatmap)", "significa": "IV por moneyness (K/S) e por prazo"},
+            {"campo": "Moneyness (K/S)", "significa": "strike ÷ preço à vista; ~1 é ATM, <1 e >1 fora do dinheiro"},
+        ],
+    },
+    "carteira": {
+        "tela": "Carteira",
+        "para_que_serve": "consolidar risco das posições e ver cenários",
+        "colunas": [
+            {"campo": "Posição / Qtd", "significa": "ativo e quantidade (+ comprado, − vendido)"},
+            {"campo": "Valor", "significa": "marcação a mercado da posição (qtd × preço × multiplicador)"},
+            {"campo": "Δ/Γ/Vega/Θ líquidos", "significa": "gregas somadas de todas as posições",
+             "como_ler": "delta líquido = exposição direcional; theta líquido = ganho/custo de tempo por dia"},
+            {"campo": "Stress", "significa": "P&L aproximado se o mercado mover −10%…+10% (delta-gamma-vega)"},
+            {"campo": "Payoff", "significa": "lucro/prejuízo hoje vs no vencimento ao longo do preço"},
+        ],
+    },
+    "analista": {
+        "tela": "Analista — briefing",
+        "para_que_serve": "transformar um ativo numa operação de risco definido, dos dois lados",
+        "colunas": [
+            {"campo": "Fatos", "significa": "IV vs RV, liquidez, delta e prazo do setup"},
+            {"campo": "A favor / Contra", "significa": "os dois lados — o caso a favor e o risco (nunca só um lado)"},
+            {"campo": "Risco-retorno", "significa": "ganho máx, perda máx e breakeven por lote"},
+            {"campo": "Sizing por perfil", "significa": "nº de lotes p/ conservador/moderado/agressivo (1%/2,5%/5% do capital)"},
+            {"campo": "Invalidação / Confiança", "significa": "o que derruba a tese e o quão forte é o sinal"},
+        ],
+    },
+}
+
+_SCREEN_ALIASES = {
+    "screener": "screener", "radar": "screener", "rastreador": "screener", "tabela": "screener",
+    "opcoes": "opcoes", "opções": "opcoes", "cadeia": "opcoes", "chain": "opcoes",
+    "superficie": "superficie", "superfície": "superficie", "termo": "superficie", "smile": "superficie",
+    "carteira": "carteira", "portfolio": "carteira", "portfólio": "carteira", "posicoes": "carteira",
+    "analista": "analista", "briefing": "analista",
+}
+
+_GLOSSARY: dict[str, dict] = {
+    "iv": {"termo": "IV — Volatilidade Implícita", "o_que_e": "o quanto o mercado espera que o ativo "
+           "oscile no futuro, embutido no preço da opção (% ao ano)", "na_pratica": "sobe antes de "
+           "eventos (balanço, decisão de juros); IV alta = opção cara, IV baixa = opção barata"},
+    "rv": {"termo": "RV — Volatilidade Realizada", "o_que_e": "o quanto o ativo REALMENTE oscilou no "
+           "passado recente (close-a-close)", "na_pratica": "é o 'gabarito' contra o qual a IV é comparada"},
+    "vrp": {"termo": "VRP — Prêmio de Risco de Volatilidade", "o_que_e": "IV menos RV", "na_pratica":
+            ">0: o mercado paga mais do que o ativo andou (vol 'rica', favorece quem vende); <0: o "
+            "contrário (favorece quem compra)"},
+    "iv rank": {"termo": "IV Rank", "o_que_e": "0–100, onde a IV de hoje está entre a mínima e a "
+                "máxima do último ~1 ano", "na_pratica": ">80 vol historicamente cara; <20 barata. "
+                "Diferente do nível absoluto de IV"},
+    "delta": {"termo": "Delta", "o_que_e": "quanto a opção sobe quando o ativo sobe R$1",
+              "na_pratica": "≈ probabilidade de terminar dentro do dinheiro; call 0..1, put −1..0"},
+    "gamma": {"termo": "Gamma", "o_que_e": "quão rápido o delta muda — a aceleração",
+              "na_pratica": "alto perto do strike e perto do vencimento; quem compra opção 'gosta' de gamma"},
+    "vega": {"termo": "Vega", "o_que_e": "quanto a opção ganha/perde se a IV sobe 1 ponto",
+             "na_pratica": "comprado em opção = comprado em vega (lucra se o nervosismo aumenta)"},
+    "theta": {"termo": "Theta", "o_que_e": "o custo do tempo: quanto o prêmio derrete por dia",
+              "na_pratica": "trabalha CONTRA quem compra e A FAVOR de quem vende; acelera perto do vencimento"},
+    "moneyness": {"termo": "Moneyness (ITM/ATM/OTM)", "o_que_e": "se a opção está dentro (ITM), no "
+                  "(ATM) ou fora (OTM) do dinheiro", "na_pratica": "ITM tem valor intrínseco; OTM é só "
+                  "expectativa/tempo e é mais barata e mais arriscada"},
+    "skew": {"termo": "Skew", "o_que_e": "a assimetria do sorriso de vol — puts OTM costumam ter IV "
+             "maior que calls OTM", "na_pratica": "mede quanto o mercado paga a mais por proteção contra queda"},
+    "breakeven": {"termo": "Breakeven", "o_que_e": "o preço do ativo onde a operação empata",
+                  "na_pratica": "call comprada: strike + prêmio; put comprada: strike − prêmio"},
+    "strike": {"termo": "Strike", "o_que_e": "o preço de exercício combinado da opção", "na_pratica":
+               "a B3 ajusta o strike por proventos (dividendos/JCP)"},
+    "premio": {"termo": "Prêmio", "o_que_e": "o preço da opção", "na_pratica": "quem compra paga o "
+               "prêmio (risco limitado a ele); quem vende recebe (e assume a obrigação)"},
+    "titular": {"termo": "Titular (comprador)", "o_que_e": "quem compra a opção e tem o DIREITO",
+                "na_pratica": "perda máxima = o prêmio; precisa de movimento para pagar o theta"},
+    "lancador": {"termo": "Lançador (vendedor)", "o_que_e": "quem vende a opção e tem a OBRIGAÇÃO",
+                 "na_pratica": "recebe o prêmio e ganha com o tempo, mas o risco pode ser grande sem trava"},
+    "americana": {"termo": "Opção americana", "o_que_e": "pode ser exercida a qualquer momento até o "
+                  "vencimento", "na_pratica": "opções de ações na B3 são americanas (precificadas aqui "
+                  "por Bjerksund-Stensland)"},
+    "europeia": {"termo": "Opção europeia", "o_que_e": "só pode ser exercida no vencimento",
+                 "na_pratica": "as opções de índice (IBOV) são europeias e liquidadas em dinheiro"},
+    "trava": {"termo": "Trava (spread)", "o_que_e": "comprar e vender opções do mesmo tipo em strikes "
+              "diferentes", "na_pratica": "limita ganho E perda — risco definido; o Analista monta uma "
+              "trava de alta vendida"},
+    "put call ratio": {"termo": "Razão Put/Call", "o_que_e": "volume de puts dividido por calls",
+                       "na_pratica": ">1 mais proteção/pessimismo; <1 mais apetite de alta"},
+}
+
+
+def screen_guide(conn, *, tela: str | None = None) -> dict:
+    """Glossário das COLUNAS de cada tela do ATLAS (o que cada valor da tabela
+    significa). Conhecimento estático da solução — não inventa números."""
+    if tela:
+        key = _SCREEN_ALIASES.get(tela.lower().strip())
+        if key:
+            return dict(_SCREEN_GUIDE[key])
+        return {"error": f"tela '{tela}' não reconhecida.", "telas_disponiveis": list(_SCREEN_GUIDE)}
+    return {"telas": [{"id": k, "tela": v["tela"],
+                       "colunas": [c["campo"] for c in v["colunas"]]} for k, v in _SCREEN_GUIDE.items()]}
+
+
+def glossary(conn, *, termo: str | None = None) -> dict:
+    """Dicionário de conceitos de mercado/opções (IV, RV, VRP, gregas, moneyness,
+    skew, breakeven, titular/lançador…) — definição clara + nuance prática."""
+    if termo:
+        t = termo.lower().strip()
+        if t in _GLOSSARY:  # exact concept wins
+            return {"resultados": [_GLOSSARY[t]]}
+        # otherwise substring matches, most-specific (longest key) first
+        hits = [_GLOSSARY[k] for k in sorted(_GLOSSARY, key=len, reverse=True)
+                if t in k or k in t or t in _GLOSSARY[k]["termo"].lower()]
+        if hits:
+            return {"resultados": hits[:4]}
+        return {"error": f"'{termo}' não está no glossário.",
+                "termos": [v["termo"] for v in _GLOSSARY.values()]}
+    return {"termos": [v["termo"] for v in _GLOSSARY.values()]}
+
+
 # --- registry + schemas ----------------------------------------------------
 
 _REGISTRY: dict[str, Callable[..., dict]] = {
@@ -441,6 +601,8 @@ _REGISTRY: dict[str, Callable[..., dict]] = {
     "term_structure": term_structure,
     "briefing": briefing,
     "portfolio": portfolio,
+    "screen_guide": screen_guide,
+    "glossary": glossary,
     "solution_overview": solution_overview,
 }
 
@@ -562,6 +724,31 @@ TOOL_SCHEMAS: list[dict] = [
                        "de payoff no vencimento. Use para 'como está minha carteira', 'qual meu "
                        "risco', 'meu delta/theta', 'e se o mercado cair 10%'.",
         "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "screen_guide",
+        "description": "Explica as COLUNAS de cada tela do ATLAS e o que cada valor significa "
+                       "(Screener, Opções/cadeia, Superfície, Carteira, Analista). USE quando "
+                       "perguntarem 'o que significam os valores/colunas da tabela da tela X', 'o que "
+                       "tem no screener', 'o que é a coluna VRP/IV Rank/Skew na tabela'. Passe 'tela' "
+                       "(ex: screener) para uma tela específica, ou nada para o índice de todas.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"tela": {"type": "string",
+                                    "description": "screener | opcoes | superficie | carteira | analista"}},
+        },
+    },
+    {
+        "name": "glossary",
+        "description": "Dicionário de conceitos do mercado de opções (IV, RV, VRP, IV Rank, delta, "
+                       "gamma, vega, theta, moneyness, skew, breakeven, strike, prêmio, titular, "
+                       "lançador, americana/europeia, trava…), com definição clara e nuance prática. "
+                       "USE para 'o que é/significa <termo>', 'me explica delta/skew/breakeven'. Passe "
+                       "'termo' para um conceito; sem 'termo' devolve a lista de termos disponíveis.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"termo": {"type": "string", "description": "conceito, ex: IV Rank, delta, skew"}},
+        },
     },
     {
         "name": "solution_overview",

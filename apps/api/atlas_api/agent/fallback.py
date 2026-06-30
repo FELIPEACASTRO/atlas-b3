@@ -33,6 +33,11 @@ _PORTFOLIO_WORDS = ("carteira", "minha posi", "minhas posi", "meu risco", "meu p
 _PANORAMA_WORDS = ("panorama", "mercado hoje", "resumo do dia", "como esta o mercado",
                    "como está o mercado", "como anda o mercado", "visão geral do mercado",
                    "como esta o dia", "como está o dia")
+_GUIDE_WORDS = ("tabela", "coluna", "colunas", "campos", "valores da tela", "valores dessa tabela",
+                "valores da tabela", "o que tem no screener", "o que tem na tela", "tela screener",
+                "schema", "legenda", "quais valores")
+_GLOSSARY_TRIGGER = ("o que significa", "o que é ", "o que e ", "o que quer dizer", "me explic",
+                     "explica o que", "glossário", "glossario", "significado de", "defina", "definição")
 _HELP = (
     "Posso responder com os números reais da base (COTAHIST EOD). Exemplos do que entendo agora:\n"
     "• \"como está a PETR4?\" — retrato do ativo (IV, IV Rank, VRP, vol)\n"
@@ -172,6 +177,45 @@ def _term_text(conn, ticker: str) -> str:
     ])
 
 
+def _guide_text(conn, tela: str | None) -> str:
+    g = tools.screen_guide(conn, tela=tela)
+    if g.get("error"):
+        return g["error"]
+    if "telas" in g:
+        return "As telas do ATLAS e suas colunas:\n" + "\n".join(
+            f"• **{t['tela']}**: {', '.join(t['colunas'])}" for t in g["telas"])
+    cols = "\n".join(
+        f"• **{c['campo']}** — {c['significa']}" + (f" ({c['como_ler']})" if c.get("como_ler") else "")
+        for c in g["colunas"])
+    return f"**{g['tela']}** — {g['para_que_serve']}.\nColunas da tabela:\n{cols}"
+
+
+def _glossary_text(conn, termo: str | None) -> str:
+    g = tools.glossary(conn, termo=termo)
+    res = g.get("resultados")
+    if res:
+        return "\n\n".join(f"**{r['termo']}** — {r['o_que_e']}.\nNa prática: {r['na_pratica']}"
+                           for r in res)
+    termos = ", ".join(g.get("termos", []))
+    if g.get("error"):
+        return f"{g['error']}\nConceitos que eu explico: {termos}."
+    return f"Conceitos que eu explico: {termos}.\nPergunte 'o que é <termo>' (ex: o que é IV Rank)."
+
+
+def _detect_tela(ql: str) -> str | None:
+    for alias, key in tools._SCREEN_ALIASES.items():
+        if alias in ql:
+            return key
+    return "screener" if ("tabela" in ql or "screener" in ql) else None
+
+
+def _detect_term(ql: str) -> str | None:
+    for k in tools._GLOSSARY:
+        if re.search(r"\b" + re.escape(k) + r"\b", ql):
+            return k
+    return None
+
+
 def _screen_text(conn, signal: str | None) -> str:
     order = "iv_rank_desc" if signal == "rico" else "iv_rank_asc" if signal == "barato" else "iv_rank_desc"
     res = tools.screen_underlyings(conn, signal=signal, order=order, limit=8)
@@ -223,6 +267,18 @@ def answer(question: str, conn) -> tuple[str, list[dict], str | None]:
                 tool_calls.append({"name": "search_options",
                                    "args": {"underlying": t, "kind": "call", "order": "cheapest"}})
             return _snapshot_text(conn, t, calls.get("opcoes", [])), tool_calls, note
+
+    # columns/values of a screen's table -> field guide
+    if any(w in ql for w in _GUIDE_WORDS):
+        tela = _detect_tela(ql)
+        tool_calls.append({"name": "screen_guide", "args": {"tela": tela} if tela else {}})
+        return _guide_text(conn, tela), tool_calls, note
+    # "what does <term> mean" -> glossary (only when a known concept is present)
+    if any(w in ql for w in _GLOSSARY_TRIGGER):
+        term = _detect_term(ql)
+        if term:
+            tool_calls.append({"name": "glossary", "args": {"termo": term}})
+            return _glossary_text(conn, term), tool_calls, note
 
     # the user's portfolio (no ticker needed)
     if any(w in ql for w in _PORTFOLIO_WORDS):
