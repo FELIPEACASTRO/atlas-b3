@@ -18,11 +18,12 @@ from atlas_api.data.option_code import code_consistent
 from atlas_api.pricing.bs import bs_greeks
 from atlas_api.pricing.iv import implied_vol, iv_is_reliable
 from atlas_api.pricing.rv import realized_vol
-from atlas_api.pricing.signal import classify
+from atlas_api.pricing.signal import classify, iv_rank
 
 _SUFFIXES = ("4", "3", "11", "5", "6")
 _DEFAULT_RATE = 0.1165
 _MIN_HISTORY = 3  # closes needed for a realized-vol estimate
+_BD_YEAR = 252  # B3 business days/year; annual theta -> per-day decay
 
 
 def _guess_underlying(option_ticker: str, stocks: dict[str, Quote]) -> str | None:
@@ -83,7 +84,7 @@ def ingest_cotahist(
             continue
         underlying = stock_by_isin.get(qt.isin) or _guess_underlying(qt.ticker, stocks)
         base = stocks.get(underlying) if underlying else None
-        iv = delta = gamma = vega = None
+        iv = delta = gamma = vega = theta = None
         if base and qt.strike and qt.venc:
             T = _years_to_expiry(asof, qt.venc)
             q_u = q_map.get(underlying, q)  # real dividend yield when known, else 0
@@ -96,16 +97,22 @@ def ingest_cotahist(
                 iv = round(iv_val, 4)
                 g = bs_greeks(qt.tipo, base.preco_ult, qt.strike, rate, q_u, T, iv_val)
                 delta, gamma, vega = round(g["delta"], 4), round(g["gamma"], 6), round(g["vega"], 4)
+                theta = round(g["theta"] / _BD_YEAR, 4)  # per-day decay (252 base)
                 dist = abs(qt.strike - base.preco_ult)
                 if underlying not in atm or dist < atm[underlying][0]:
                     atm[underlying] = (dist, iv_val)
-        opt_inst_rows.append((qt.ticker, qt.tipo, qt.preco_ult, None, qt.volume, iv, None, asof_s))
+        opt_inst_rows.append((qt.ticker, qt.tipo, qt.preco_ult, None, qt.volume, iv, None, None, asof_s))
         if underlying:
             opt_rows.append((
                 underlying, qt.ticker, qt.tipo, qt.strike,
                 qt.venc.isoformat() if qt.venc else None,
-                qt.preco_ult, iv, delta, gamma, vega, asof_s,
+                qt.preco_ult, iv, delta, gamma, vega, theta, asof_s,
             ))
+
+    # persist today's ATM IV per underlying so IV Rank has a trailing window.
+    store.upsert_iv_daily(
+        conn, [(u, asof_s, round(iv_val, 4)) for u, (_d, iv_val) in atm.items()]
+    )
 
     stock_inst_rows: list[tuple] = []
     for qt in stocks.values():
@@ -120,7 +127,8 @@ def ingest_cotahist(
         atm_iv = atm[qt.ticker][1] if qt.ticker in atm else None
         sig = classify(atm_iv, rv) if (atm_iv is not None and rv == rv) else None
         iv_col = round(atm_iv, 4) if atm_iv is not None else None
-        stock_inst_rows.append((qt.ticker, "acao", qt.preco_ult, var, qt.volume, iv_col, sig, asof_s))
+        rank = iv_rank(store.iv_history(conn, qt.ticker), iv_col) if iv_col is not None else None
+        stock_inst_rows.append((qt.ticker, "acao", qt.preco_ult, var, qt.volume, iv_col, sig, rank, asof_s))
 
     store.reset(conn)
     store.insert_instruments(conn, stock_inst_rows + opt_inst_rows)

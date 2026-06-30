@@ -5,11 +5,11 @@ def test_roundtrip(tmp_path):
     db = str(tmp_path / "s.db")
     conn = store.connect(db)
     store.insert_instruments(conn, [
-        ("PETR4", "acao", 38.42, 1.2, 1.2e9, None, None, "2024-01-02"),
-        ("VALE3", "acao", 61.30, -0.8, 9.8e8, None, None, "2024-01-02"),
+        ("PETR4", "acao", 38.42, 1.2, 1.2e9, None, None, None, "2024-01-02"),
+        ("VALE3", "acao", 61.30, -0.8, 9.8e8, None, None, None, "2024-01-02"),
     ])
     store.insert_options(conn, [
-        ("PETR4", "PETRA399", "call", 38.67, "2024-01-19", 1.36, 0.512, 0.30, 0.04, 1.5, "2024-01-02"),
+        ("PETR4", "PETRA399", "call", 38.67, "2024-01-19", 1.36, 0.512, 0.30, 0.04, 1.5, -0.02, "2024-01-02"),
     ])
     store.set_meta(conn, "asof", "2024-01-02")
     conn.commit()
@@ -29,7 +29,7 @@ def test_reset_preserves_price_history(tmp_path):
     db = str(tmp_path / "p.db")
     conn = store.connect(db)
     store.upsert_prices(conn, [("X", "2024-01-02", 1.0, 2.0, 0.5, 1.5)])
-    store.insert_instruments(conn, [("X", "acao", 1.5, 0.0, 100.0, None, None, "2024-01-02")])
+    store.insert_instruments(conn, [("X", "acao", 1.5, 0.0, 100.0, None, None, None, "2024-01-02")])
     store.reset(conn)
     conn.commit()
     assert store.count(conn) == 0  # the per-day snapshot is wiped

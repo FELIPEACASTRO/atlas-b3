@@ -198,6 +198,7 @@ def screener() -> list[ScreenerRow]:
             var_pct=_nan_to_none(r["var_pct"]),
             liquidez=_nan_to_none(r["liquidez"]),
             iv=_nan_to_none(r["iv"]), iv_vs_rv=r["iv_vs_rv"],
+            iv_rank=_nan_to_none(r["iv_rank"]),
             provenance=prov, asof=asof_val,
         )
         for r in rows
@@ -221,6 +222,7 @@ def chain(underlying: str) -> list[ChainRow]:
                     kind=kind, strike=strike, last=round(last, 2),
                     iv=_nan_to_none(iv), delta=_nan_to_none(g["delta"]),
                     gamma=_nan_to_none(g["gamma"]), vega=_nan_to_none(g["vega"]),
+                    theta=_nan_to_none(g["theta"] / 252),
                     provenance=_FIXTURE, asof=now,
                 ))
         return rows
@@ -234,6 +236,7 @@ def chain(underlying: str) -> list[ChainRow]:
             ticker=r["ticker"], kind=r["kind"], strike=r["strike"], last=r["last"],
             iv=_nan_to_none(r["iv"]), delta=_nan_to_none(r["delta"]),
             gamma=_nan_to_none(r["gamma"]), vega=_nan_to_none(r["vega"]),
+            theta=_nan_to_none(r["theta"]),
             provenance=prov, asof=asof_val,
         )
         for r in store_rows
@@ -257,15 +260,17 @@ def _enrich_positions(conn) -> list[PositionRow]:
         tipo, last = inst["tipo"], inst["ultimo"]
         if tipo in ("call", "put"):
             opt = store.get_option(conn, ticker) or {}
-            mult, d, g, v = 100, opt.get("delta"), opt.get("gamma"), opt.get("vega")
+            mult = 100
+            d, g, v, th = opt.get("delta"), opt.get("gamma"), opt.get("vega"), opt.get("theta")
         else:
-            mult, d, g, v = 1, 1.0, 0.0, 0.0
+            mult, d, g, v, th = 1, 1.0, 0.0, 0.0, 0.0  # stock: delta=qty, no greeks/decay
         value = round(qty * last * mult, 2) if last is not None else None
         out.append(PositionRow(
             ticker=ticker, tipo=tipo, qty=qty, last=last, value=value,
             delta=round(qty * (d or 0.0) * mult, 4),
             gamma=round(qty * (g or 0.0) * mult, 6),
             vega=round(qty * (v or 0.0) * mult, 4),
+            theta=round(qty * (th or 0.0) * mult, 4),
         ))
     return out
 
@@ -309,6 +314,7 @@ def portfolio() -> PortfolioSummary:
         net_delta=round(sum(r.delta or 0.0 for r in rows), 2),
         net_gamma=round(sum(r.gamma or 0.0 for r in rows), 4),
         net_vega=round(sum(r.vega or 0.0 for r in rows), 2),
+        net_theta=round(sum(r.theta or 0.0 for r in rows), 2),
         provenance=f"COTAHIST EOD {asof}" if asof else "sem dado de mercado",
         asof=asof or None,
     )

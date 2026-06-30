@@ -11,25 +11,41 @@ import sqlite3
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS instruments (
   ticker TEXT, tipo TEXT, ultimo REAL, var_pct REAL, liquidez REAL,
-  iv REAL, iv_vs_rv TEXT, asof TEXT
+  iv REAL, iv_vs_rv TEXT, iv_rank REAL, asof TEXT
 );
 CREATE TABLE IF NOT EXISTS options (
   underlying TEXT, ticker TEXT, kind TEXT, strike REAL, venc TEXT,
-  last REAL, iv REAL, delta REAL, gamma REAL, vega REAL, asof TEXT
+  last REAL, iv REAL, delta REAL, gamma REAL, vega REAL, theta REAL, asof TEXT
 );
 CREATE TABLE IF NOT EXISTS prices_daily (
   ticker TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL,
+  PRIMARY KEY (ticker, date)
+);
+CREATE TABLE IF NOT EXISTS iv_daily (
+  ticker TEXT, date TEXT, atm_iv REAL,
   PRIMARY KEY (ticker, date)
 );
 CREATE TABLE IF NOT EXISTS positions (ticker TEXT PRIMARY KEY, qty REAL);
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
 """
 
+# columns added after the original schema shipped; ALTER-in on existing DBs so a
+# user's accumulated data_cache/atlas.db upgrades without a wipe.
+_MIGRATIONS = [("options", "theta", "REAL"), ("instruments", "iv_rank", "REAL")]
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    for table, col, decl in _MIGRATIONS:
+        cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if col not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+
 
 def connect(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
+    _migrate(conn)
     return conn
 
 
@@ -62,18 +78,35 @@ def price_history(conn: sqlite3.Connection, ticker: str, *, limit: int = 90) -> 
 
 def insert_instruments(conn: sqlite3.Connection, rows: list[tuple]) -> None:
     conn.executemany(
-        "INSERT INTO instruments (ticker,tipo,ultimo,var_pct,liquidez,iv,iv_vs_rv,asof) "
-        "VALUES (?,?,?,?,?,?,?,?)",
+        "INSERT INTO instruments (ticker,tipo,ultimo,var_pct,liquidez,iv,iv_vs_rv,iv_rank,asof) "
+        "VALUES (?,?,?,?,?,?,?,?,?)",
         rows,
     )
 
 
 def insert_options(conn: sqlite3.Connection, rows: list[tuple]) -> None:
     conn.executemany(
-        "INSERT INTO options (underlying,ticker,kind,strike,venc,last,iv,delta,gamma,vega,asof) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO options (underlying,ticker,kind,strike,venc,last,iv,delta,gamma,vega,theta,asof) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         rows,
     )
+
+
+def upsert_iv_daily(conn: sqlite3.Connection, rows: list[tuple]) -> None:
+    """Accumulate per-underlying ATM IV history (ticker, date, atm_iv) for IV Rank."""
+    conn.executemany(
+        "INSERT OR REPLACE INTO iv_daily (ticker,date,atm_iv) VALUES (?,?,?)", rows
+    )
+
+
+def iv_history(conn: sqlite3.Connection, ticker: str, *, limit: int = 252) -> list[float]:
+    """Oldest-first ATM IV history for a ticker (last ``limit`` sessions)."""
+    rows = conn.execute(
+        "SELECT atm_iv FROM iv_daily WHERE ticker = ? AND atm_iv IS NOT NULL "
+        "ORDER BY date DESC LIMIT ?",
+        (ticker, limit),
+    ).fetchall()
+    return [r["atm_iv"] for r in reversed(rows)]
 
 
 def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:

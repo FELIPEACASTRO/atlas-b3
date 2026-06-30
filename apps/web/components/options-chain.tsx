@@ -11,6 +11,7 @@ type Row = {
   delta: number | null;
   gamma: number | null;
   vega: number | null;
+  theta: number | null;
   provenance: string;
   asof: string;
 };
@@ -109,7 +110,8 @@ export function OptionsChain() {
                   <th className="px-3 py-2.5 text-right font-normal">IV</th>
                   <th className="px-3 py-2.5 text-right font-normal">Δ</th>
                   <th className="px-3 py-2.5 text-right font-normal">Γ</th>
-                  <th className="px-4 py-2.5 text-right font-normal">Vega</th>
+                  <th className="px-3 py-2.5 text-right font-normal">Vega</th>
+                  <th className="px-4 py-2.5 text-right font-normal">θ/dia</th>
                 </tr>
               </thead>
               <tbody>
@@ -126,7 +128,8 @@ export function OptionsChain() {
                     <td className="mono px-3 py-2.5 text-right">{r.iv != null ? `${(r.iv * 100).toFixed(0)}%` : "—"}</td>
                     <td className="mono px-3 py-2.5 text-right">{fmt(r.delta)}</td>
                     <td className="mono px-3 py-2.5 text-right">{fmt(r.gamma, 4)}</td>
-                    <td className="mono px-4 py-2.5 text-right">{fmt(r.vega)}</td>
+                    <td className="mono px-3 py-2.5 text-right">{fmt(r.vega)}</td>
+                    <td className="mono px-4 py-2.5 text-right" style={{ color: r.theta != null && r.theta < 0 ? "var(--down)" : undefined }}>{fmt(r.theta, 3)}</td>
                   </tr>
                 ))}
               </tbody>

@@ -11,6 +11,7 @@ type Pos = {
   delta: number | null;
   gamma: number | null;
   vega: number | null;
+  theta: number | null;
 };
 type PF = {
   n_positions: number;
@@ -18,6 +19,7 @@ type PF = {
   net_delta: number;
   net_gamma: number;
   net_vega: number;
+  net_theta: number;
   provenance: string;
   asof: string | null;
 };
@@ -97,12 +99,13 @@ export function Portfolio() {
       </form>
 
       {pf ? (
-        <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-5">
           {([
             ["Valor total", brl(pf.total_value)],
             ["Δ líquido", fmt(pf.net_delta)],
             ["Γ líquido", fmt(pf.net_gamma, 4)],
             ["Vega líquido", fmt(pf.net_vega)],
+            ["θ/dia líquido", fmt(pf.net_theta)],
           ] as const).map(([l, v]) => (
             <div key={l} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4">
               <div className="text-[12px] text-[var(--text-secondary)]">{l}</div>
@@ -127,6 +130,7 @@ export function Portfolio() {
                 <th className="px-3 py-2.5 text-right font-normal">Δ</th>
                 <th className="px-3 py-2.5 text-right font-normal">Γ</th>
                 <th className="px-3 py-2.5 text-right font-normal">Vega</th>
+                <th className="px-3 py-2.5 text-right font-normal">θ/dia</th>
                 <th className="px-4 py-2.5" />
               </tr>
             </thead>
@@ -141,6 +145,7 @@ export function Portfolio() {
                   <td className="mono px-3 py-2.5 text-right">{fmt(r.delta)}</td>
                   <td className="mono px-3 py-2.5 text-right">{fmt(r.gamma, 4)}</td>
                   <td className="mono px-3 py-2.5 text-right">{fmt(r.vega)}</td>
+                  <td className="mono px-3 py-2.5 text-right">{fmt(r.theta)}</td>
                   <td className="px-4 py-2.5 text-right">
                     <button onClick={() => remove(r.ticker)} className="text-[12px] text-[var(--text-tertiary)] hover:text-[var(--down)]">
                       remover

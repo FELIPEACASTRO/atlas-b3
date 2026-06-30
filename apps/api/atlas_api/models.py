@@ -45,6 +45,7 @@ class ScreenerRow(BaseModel):
     liquidez: float | None = None
     iv: float | None = None
     iv_vs_rv: str | None = None
+    iv_rank: float | None = None
     provenance: str
     asof: datetime
 
@@ -58,6 +59,7 @@ class ChainRow(BaseModel):
     delta: float | None = None
     gamma: float | None = None
     vega: float | None = None
+    theta: float | None = None
     provenance: str
     asof: datetime
 
@@ -76,6 +78,7 @@ class PositionRow(BaseModel):
     delta: float | None = None
     gamma: float | None = None
     vega: float | None = None
+    theta: float | None = None
 
 
 class PortfolioSummary(BaseModel):
@@ -84,5 +87,6 @@ class PortfolioSummary(BaseModel):
     net_delta: float
     net_gamma: float
     net_vega: float
+    net_theta: float
     provenance: str
     asof: datetime | None = None

@@ -59,7 +59,7 @@ def test_screener_handles_null_ultimo(tmp_path, monkeypatch):
 
     db = str(tmp_path / "n.db")
     conn = store.connect(db)
-    store.insert_instruments(conn, [("XXXX3", "acao", None, None, None, None, None, "2024-01-02")])
+    store.insert_instruments(conn, [("XXXX3", "acao", None, None, None, None, None, None, "2024-01-02")])
     conn.commit()
     conn.close()
     monkeypatch.setenv("ATLAS_DB", db)
@@ -87,13 +87,13 @@ def _seed_real_store(db: str) -> None:
         ("PETR4", "2024-01-04", 38.0, 38.5, 37.9, 38.3),
     ])
     store.insert_instruments(conn, [
-        ("PETR4", "acao", 38.3, 1.2, 1e9, 0.30, "rico", "2024-01-04"),
-        ("PETRA38", "call", 1.10, None, 1e6, 0.30, None, "2024-01-04"),
-        ("PETRA40", "call", 0.40, None, 1e6, 0.32, None, "2024-01-04"),
+        ("PETR4", "acao", 38.3, 1.2, 1e9, 0.30, "rico", None, "2024-01-04"),
+        ("PETRA38", "call", 1.10, None, 1e6, 0.30, None, None, "2024-01-04"),
+        ("PETRA40", "call", 0.40, None, 1e6, 0.32, None, None, "2024-01-04"),
     ])
     store.insert_options(conn, [
-        ("PETR4", "PETRA38", "call", 38.0, "2024-01-19", 1.10, 0.30, 0.55, 0.04, 1.5, "2024-01-04"),
-        ("PETR4", "PETRA40", "call", 40.0, "2024-01-19", 0.40, 0.32, 0.30, 0.03, 1.2, "2024-01-04"),
+        ("PETR4", "PETRA38", "call", 38.0, "2024-01-19", 1.10, 0.30, 0.55, 0.04, 1.5, -0.03, "2024-01-04"),
+        ("PETR4", "PETRA40", "call", 40.0, "2024-01-19", 0.40, 0.32, 0.30, 0.03, 1.2, -0.02, "2024-01-04"),
     ])
     store.set_meta(conn, "asof", "2024-01-04")
     conn.commit()
@@ -135,5 +135,7 @@ def test_positions_crud_and_portfolio_risk(tmp_path, monkeypatch):
     assert pf["n_positions"] == 2
     # net delta = stock(100) + short 5 calls(-5*0.55*100=-275)
     assert pf["net_delta"] == round(100 + (-5 * 0.55 * 100), 2)
+    # short 5 calls earns decay: net theta = -5 * (-0.03) * 100 = +15
+    assert pf["net_theta"] == round(-5 * -0.03 * 100, 2)
     client.delete("/positions/PETR4")
     assert client.get("/portfolio").json()["n_positions"] == 1
