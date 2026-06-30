@@ -163,7 +163,8 @@ def ingest_cotahist(
         sig = classify(atm_iv, rv_val) if (atm_iv is not None and rv_val == rv_val) else None
         iv_col = round(atm_iv, 4) if atm_iv is not None else None
         rank = iv_rank(store.iv_history(conn, qt.ticker), iv_col) if iv_col is not None else None
-        stock_inst_rows.append((qt.ticker, "acao", qt.preco_ult, var, qt.volume, iv_col, sig, rank, asof_s))
+        tipo = "indice" if qt.ticker in index_set else "acao"  # IBOV11 is the index, not a stock
+        stock_inst_rows.append((qt.ticker, tipo, qt.preco_ult, var, qt.volume, iv_col, sig, rank, asof_s))
         # labeled option features: variance premium, flow, OTM-put skew
         cvol, pvol = vol_by_kind.get(qt.ticker, [0.0, 0.0])
         rv_arg = rv_val if rv_val == rv_val else None

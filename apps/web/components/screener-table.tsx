@@ -36,7 +36,7 @@ function fmtLiq(n: number): string {
 }
 
 function tipoLabel(t: string): string {
-  return t === "acao" ? "Ação" : t === "call" ? "Call" : t === "put" ? "Put" : t;
+  return t === "acao" ? "Ação" : t === "indice" ? "Índice" : t === "call" ? "Call" : t === "put" ? "Put" : t;
 }
 
 function SigBadge({ sig }: { sig: string | null }) {
