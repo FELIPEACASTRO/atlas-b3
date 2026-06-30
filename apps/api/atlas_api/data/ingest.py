@@ -158,3 +158,60 @@ def ingest_cotahist(
     total = store.count(conn)
     conn.close()
     return total
+
+
+def ingest_history(
+    path: str, db_path: str, *, rate: float | None = None, q_by_ticker: dict[str, float] | None = None
+) -> int:
+    """Light backfill: persist OHLC + ATM IV per underlying only.
+
+    For historical sessions we only need what feeds IV Rank, realized vol, and the
+    history charts: the daily OHLC and one ATM implied vol per underlying. Skipping
+    the full per-strike chain/greeks (only the latest day is displayed) makes a deep
+    backfill ~50x faster. Non-destructive: only appends to prices_daily / iv_daily.
+    Returns the number of underlyings that got an ATM IV that day.
+    """
+    quotes = parse_file(path)
+    if quotes and len({qt.data for qt in quotes}) > 1:
+        raise ValueError("COTAHIST multi-data (arquivo anual?) — ingira arquivos diários")
+    if not quotes:
+        return 0
+    asof = quotes[0].data
+    asof_s = asof.isoformat()
+    if rate is None:
+        rate = fetch_annual_rate() or _DEFAULT_RATE
+    q_map = q_by_ticker or {}
+    stocks = {qt.ticker: qt for qt in quotes if qt.tipo == "acao"}
+    stock_by_isin = {qt.isin: qt.ticker for qt in quotes if qt.tipo == "acao" and qt.isin}
+
+    conn = store.connect(db_path)
+    store.upsert_prices(
+        conn,
+        [(qt.ticker, asof_s, qt.preco_abe, qt.preco_max, qt.preco_min, qt.preco_ult)
+         for qt in stocks.values()],
+    )
+    # closest-to-spot option per underlying -> compute IV only for that one (~163/day)
+    atm_q: dict[str, tuple[float, Quote, Quote]] = {}
+    for qt in quotes:
+        if qt.tipo not in ("call", "put") or not qt.strike or not qt.venc:
+            continue
+        if not code_consistent(qt.ticker, qt.tipo, qt.venc.month):
+            continue
+        u = stock_by_isin.get(qt.isin) or _guess_underlying(qt.ticker, stocks)
+        base = stocks.get(u) if u else None
+        if not base:
+            continue
+        dist = abs(qt.strike - base.preco_ult)
+        if u not in atm_q or dist < atm_q[u][0]:
+            atm_q[u] = (dist, qt, base)
+
+    iv_rows: list[tuple] = []
+    for u, (_d, qt, base) in atm_q.items():
+        T = _years_to_expiry(asof, qt.venc)
+        iv = american_iv(qt.tipo, qt.preco_ult, base.preco_ult, qt.strike, rate, q_map.get(u, 0.0), T)
+        if iv_is_reliable(qt.tipo, qt.preco_ult, base.preco_ult, qt.strike, iv):
+            iv_rows.append((u, asof_s, round(iv, 4)))
+    store.upsert_iv_daily(conn, iv_rows)
+    conn.commit()
+    conn.close()
+    return len(iv_rows)

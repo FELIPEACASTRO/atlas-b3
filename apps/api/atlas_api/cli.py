@@ -3,11 +3,15 @@
 From apps/api, with the venv's python:
   python -m atlas_api.cli ingest --date 02012024 --date 03012024
   python -m atlas_api.cli ingest --file /path/COTAHIST_Dxxxx.TXT
-  python -m atlas_api.cli ingest --date 02012024 --rate 0.1165   # historical backfill
+  python -m atlas_api.cli backfill --sessions 120     # last 120 trading days -> now
+  python -m atlas_api.cli backfill --to 26062026 --sessions 252
 
-Downloads each daily COTAHIST zip from B3, unzips, and ingests in the order
-given (chronological for a correct realized-vol series). Writes to --db (default
-ATLAS_DB env or data_cache/atlas.db) — the same DB the API reads.
+`ingest` downloads/ingests specific days (full chain). `backfill` walks back from
+--to over trading days (skipping holidays via 404), ingests history light
+(OHLC + ATM IV per underlying) for all but the most recent day, then ingests the
+most recent day in full — so IV Rank / RV / charts get real depth while only the
+current snapshot carries the whole chain. Writes to --db (default ATLAS_DB env or
+data_cache/atlas.db), the same DB the API reads.
 """
 from __future__ import annotations
 
@@ -15,13 +19,16 @@ import argparse
 import datetime as dt
 import io
 import os
+import urllib.error
 import urllib.request
 import zipfile
 
+from atlas_api.data.bcb_sgs import fetch_annual_rate
 from atlas_api.data.brapi import fetch_dividend_yields
-from atlas_api.data.ingest import ingest_cotahist
+from atlas_api.data.ingest import ingest_cotahist, ingest_history
 
 _URL = "https://bvmf.bmfbovespa.com.br/InstDados/SerHist/COTAHIST_D{date}.ZIP"
+_DEFAULT_RATE = 0.1165
 
 # B3 option liquidity concentrates here; brapi serves PETR4/VALE3/ITUB4/MGLU3 free,
 # the rest need BRAPI_TOKEN. Failures are skipped (q falls back to 0), so a long
@@ -43,32 +50,34 @@ def download_cotahist(date: str, dest_dir: str) -> str:
     return os.path.join(dest_dir, name)
 
 
-def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="atlas")
-    sub = parser.add_subparsers(dest="cmd", required=True)
-    ing = sub.add_parser("ingest", help="download/ingest COTAHIST days into the local store")
-    ing.add_argument("--date", action="append", default=[], help="DDMMYYYY (repeatable)")
-    ing.add_argument("--file", action="append", default=[], help="local COTAHIST .TXT (repeatable)")
-    ing.add_argument("--db", default=os.environ.get("ATLAS_DB", "data_cache/atlas.db"))
-    ing.add_argument("--cache", default="data_cache/cotahist")
-    ing.add_argument("--rate", type=float, default=None, help="risk-free override (else live BCB-SGS)")
-    ing.add_argument("--no-dividends", action="store_true", help="skip brapi dividend-yield (q) fetch")
-    args = parser.parse_args(argv)
+def _discover_sessions(to_date: dt.date, sessions: int, cache: str) -> list[tuple[dt.date, str]]:
+    """Walk back from to_date over weekdays, downloading each existing daily file.
 
-    if os.path.dirname(args.db):
-        os.makedirs(os.path.dirname(args.db), exist_ok=True)
-    os.makedirs(args.cache, exist_ok=True)
+    A 404 means a non-trading day (holiday) — skipped. Returns (date, txt_path)
+    oldest-first. Stops after collecting ``sessions`` files or scanning ~2x that
+    many calendar days (safety against an unbounded loop).
+    """
+    found: list[tuple[dt.date, str]] = []
+    d = to_date
+    scanned = 0
+    while len(found) < sessions and scanned < sessions * 2 + 30:
+        scanned += 1
+        if d.weekday() < 5:  # Mon-Fri
+            try:
+                path = download_cotahist(d.strftime("%d%m%Y"), cache)
+                found.append((d, path))
+            except (urllib.error.HTTPError, urllib.error.URLError, StopIteration):
+                pass  # holiday / not published
+        d -= dt.timedelta(days=1)
+    return list(reversed(found))
 
+
+def _cmd_ingest(args) -> None:
     q_by_ticker: dict[str, float] = {}
     if not args.no_dividends:
-        # use the era's trailing-12m yield for backfills, not today's (brapi keeps
-        # historical dividends; the parser filters by asof). Latest --date = asof.
-        q_asof = None
-        if args.date:
-            q_asof = max(dt.datetime.strptime(d, "%d%m%Y").date() for d in args.date)
+        q_asof = max((dt.datetime.strptime(d, "%d%m%Y").date() for d in args.date), default=None)
         q_by_ticker = fetch_dividend_yields(_LIQUID_UNDERLYINGS, asof=q_asof)
-        print(f"dividend yields (brapi, asof={q_asof or 'today'}): {len(q_by_ticker)} tickers -> "
-              + (", ".join(f"{t}={v:.2%}" for t, v in sorted(q_by_ticker.items())) or "(none)"))
+        print(f"dividend yields (brapi, asof={q_asof or 'today'}): {len(q_by_ticker)} tickers")
 
     files = list(args.file)
     for d in args.date:
@@ -77,6 +86,57 @@ def main(argv: list[str] | None = None) -> None:
     for path in files:
         total = ingest_cotahist(path, args.db, rate=args.rate, q_by_ticker=q_by_ticker)
         print(f"ingerido {os.path.basename(path)} -> {total} instrumentos | db={args.db}")
+
+
+def _cmd_backfill(args) -> None:
+    to_date = dt.datetime.strptime(args.to, "%d%m%Y").date() if args.to else dt.date.today()
+    print(f"descobrindo até {args.sessions} pregões até {to_date} ...")
+    days = _discover_sessions(to_date, args.sessions, args.cache)
+    if not days:
+        print("nenhum pregão encontrado (B3 fora do ar ou datas inválidas)")
+        return
+    rate = args.rate or fetch_annual_rate() or _DEFAULT_RATE
+    q_by_ticker = fetch_dividend_yields(_LIQUID_UNDERLYINGS, asof=days[-1][0])
+    print(f"{len(days)} pregões: {days[0][0]} -> {days[-1][0]} | rate={rate:.4f} | q={len(q_by_ticker)} tickers")
+    for i, (d, path) in enumerate(days):
+        last = i == len(days) - 1
+        if last:
+            total = ingest_cotahist(path, args.db, rate=rate, q_by_ticker=q_by_ticker)
+            print(f"  [{i+1}/{len(days)}] {d} FULL -> {total} instrumentos")
+        else:
+            n = ingest_history(path, args.db, rate=rate, q_by_ticker=q_by_ticker)
+            print(f"  [{i+1}/{len(days)}] {d} hist -> {n} subjacentes c/ IV ATM")
+    print(f"backfill completo: {len(days)} pregões em {args.db}")
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(prog="atlas")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    ing = sub.add_parser("ingest", help="download/ingest specific COTAHIST days (full chain)")
+    ing.add_argument("--date", action="append", default=[], help="DDMMYYYY (repeatable)")
+    ing.add_argument("--file", action="append", default=[], help="local COTAHIST .TXT (repeatable)")
+    ing.add_argument("--db", default=os.environ.get("ATLAS_DB", "data_cache/atlas.db"))
+    ing.add_argument("--cache", default="data_cache/cotahist")
+    ing.add_argument("--rate", type=float, default=None, help="risk-free override (else live BCB-SGS)")
+    ing.add_argument("--no-dividends", action="store_true", help="skip brapi dividend-yield (q) fetch")
+
+    bf = sub.add_parser("backfill", help="backfill N recent trading days (history light + latest full)")
+    bf.add_argument("--to", default=None, help="end date DDMMYYYY (default: today)")
+    bf.add_argument("--sessions", type=int, default=120, help="number of trading days to load")
+    bf.add_argument("--db", default=os.environ.get("ATLAS_DB", "data_cache/atlas.db"))
+    bf.add_argument("--cache", default="data_cache/cotahist")
+    bf.add_argument("--rate", type=float, default=None, help="risk-free override (else live BCB-SGS)")
+
+    args = parser.parse_args(argv)
+    if os.path.dirname(args.db):
+        os.makedirs(os.path.dirname(args.db), exist_ok=True)
+    os.makedirs(args.cache, exist_ok=True)
+
+    if args.cmd == "ingest":
+        _cmd_ingest(args)
+    elif args.cmd == "backfill":
+        _cmd_backfill(args)
 
 
 if __name__ == "__main__":

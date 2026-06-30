@@ -3,7 +3,7 @@ import os
 import pytest
 
 from atlas_api.data import store
-from atlas_api.data.ingest import _pct_change, ingest_cotahist
+from atlas_api.data.ingest import _pct_change, ingest_cotahist, ingest_history
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "cotahist_sample.txt")
 
@@ -32,6 +32,22 @@ def test_ingest_accepts_dividend_yield_map(tmp_path):
     db = str(tmp_path / "q.db")
     n = ingest_cotahist(FIXTURE, db, rate=0.1165, q_by_ticker={"PETR3": 0.07})
     assert n >= 3
+
+
+def test_ingest_history_is_light_and_non_destructive(tmp_path):
+    # a full snapshot, then a light history pass for the same day: instruments are
+    # untouched (light mode never resets) but OHLC history persists for IV Rank/RV
+    db = str(tmp_path / "h.db")
+    ingest_cotahist(FIXTURE, db, rate=0.1165)
+    conn = store.connect(db)
+    before = store.count(conn)
+    conn.close()
+    n = ingest_history(FIXTURE, db, rate=0.1165)
+    assert isinstance(n, int)
+    conn = store.connect(db)
+    assert store.count(conn) == before  # light mode did NOT wipe the snapshot
+    assert len(store.price_history(conn, "PETR4")) >= 1  # prices accumulated
+    conn.close()
 
 
 def test_ingest_rejects_multi_date_file(tmp_path):
