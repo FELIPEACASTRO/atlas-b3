@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type Row = {
   ticker: string;
@@ -53,6 +54,7 @@ function SigBadge({ sig }: { sig: string | null }) {
 }
 
 export function ScreenerTable() {
+  const router = useRouter();
   const [rows, setRows] = useState<Row[]>(FALLBACK);
   const [provenance, setProvenance] = useState<string>("fixture (API offline)");
   const [query, setQuery] = useState("");
@@ -103,8 +105,13 @@ export function ScreenerTable() {
           </thead>
           <tbody>
             {filtered.map((r) => (
-              <tr key={r.ticker} className="border-t border-[var(--border-subtle)]">
-                <td className="mono px-4 py-2.5 font-medium">{r.ticker}</td>
+              <tr
+                key={r.ticker}
+                onClick={() => router.push(`/opcoes?t=${r.ticker}`)}
+                className="atlas-row cursor-pointer border-t border-[var(--border-subtle)]"
+                title={`Abrir cadeia de ${r.ticker}`}
+              >
+                <td className="mono px-4 py-2.5 font-medium" style={{ color: "var(--accent)" }}>{r.ticker}</td>
                 <td className="px-3 py-2.5 text-[var(--text-secondary)]">{tipoLabel(r.tipo)}</td>
                 <td className="mono px-3 py-2.5 text-right">
                   {r.ultimo != null ? r.ultimo.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—"}

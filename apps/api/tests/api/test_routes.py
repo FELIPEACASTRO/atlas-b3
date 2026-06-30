@@ -168,6 +168,19 @@ def test_history_iv_vs_rv_series(tmp_path, monkeypatch):
     assert d["iv_rank"] is not None  # 30 >= MIN_IV_HISTORY
 
 
+def test_surface_term_structure_and_grid(tmp_path, monkeypatch):
+    db = str(tmp_path / "surf.db")
+    _seed_real_store(db)  # PETR4 spot 38.3 + PETRA38/PETRA40 calls (2 strikes, same venc)
+    monkeypatch.setenv("ATLAS_DB", db)
+    d = client.get("/surface/PETR4").json()
+    assert d["spot"] == 38.3
+    assert len(d["expiries"]) >= 1  # one maturity (2024-01-19)
+    e = d["expiries"][0]
+    assert e["dte"] > 0 and 0 < e["atm_iv"] < 3
+    assert len(d["points"]) == 2  # two strikes with IV
+    assert all(p["moneyness"] > 0 for p in d["points"])
+
+
 def test_portfolio_stress_delta_gamma(tmp_path, monkeypatch):
     db = str(tmp_path / "st.db")
     _seed_real_store(db)

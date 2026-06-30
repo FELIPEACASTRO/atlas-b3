@@ -29,6 +29,9 @@ from atlas_api.models import (
     SizingOut,
     StressPoint,
     StressResponse,
+    SurfaceExpiry,
+    SurfacePoint,
+    SurfaceResponse,
 )
 from atlas_api.pricing.bs import bs_greeks, bs_price
 from atlas_api.pricing.iv import implied_vol
@@ -372,6 +375,40 @@ def history(ticker: str, window: int = 21) -> HistoryResponse:
     rank = iv_rank(iv_vals, iv_vals[-1]) if iv_vals else None
     prov = f"COTAHIST EOD {asof}" if asof else "COTAHIST EOD"
     return HistoryResponse(ticker=ticker, points=points, iv_rank=rank, provenance=prov, asof=asof)
+
+
+@app.get("/surface/{ticker}", response_model=SurfaceResponse)
+def surface(ticker: str) -> SurfaceResponse:
+    """IV term structure (ATM IV per maturity) + the full smile x maturity grid."""
+    ticker = ticker.upper()
+    conn = _store_conn()
+    if conn is None:
+        return SurfaceResponse(ticker=ticker, expiries=[], points=[], provenance=_FIXTURE)
+    rows = store.query_chain(conn, ticker, limit=3000)
+    inst = store.get_instrument(conn, ticker)
+    asof = store.get_meta(conn, "asof")
+    conn.close()
+    spot = inst["ultimo"] if inst else None
+    prov = f"COTAHIST EOD {asof}" if asof else "COTAHIST EOD"
+    if not spot or spot <= 0:
+        return SurfaceResponse(ticker=ticker, spot=spot, expiries=[], points=[], provenance=prov, asof=asof)
+    asof_d = date.fromisoformat(asof) if asof else None
+    by_venc: dict[str, list] = {}
+    for r in rows:
+        if r["iv"] is None or r["strike"] is None or not r["venc"]:
+            continue
+        by_venc.setdefault(r["venc"], []).append(r)
+    expiries: list[SurfaceExpiry] = []
+    points: list[SurfacePoint] = []
+    for venc in sorted(by_venc):
+        opts = by_venc[venc]
+        atm = min(opts, key=lambda o: abs(o["strike"] - spot))
+        dte = (date.fromisoformat(venc) - asof_d).days if asof_d else 0
+        expiries.append(SurfaceExpiry(venc=venc, dte=dte, atm_iv=round(atm["iv"], 4)))
+        for o in opts:
+            points.append(SurfacePoint(venc=venc, strike=o["strike"],
+                                       moneyness=round(o["strike"] / spot, 4), iv=round(o["iv"], 4)))
+    return SurfaceResponse(ticker=ticker, spot=spot, expiries=expiries, points=points, provenance=prov, asof=asof)
 
 
 @app.get("/portfolio/stress", response_model=StressResponse)

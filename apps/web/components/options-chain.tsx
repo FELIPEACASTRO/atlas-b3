@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { VolHistory } from "@/components/vol-history";
+import { IvSurface } from "@/components/iv-surface";
 
 type Row = {
   ticker: string;
@@ -104,6 +105,7 @@ export function OptionsChain() {
       </div>
 
       <VolHistory ticker={ticker} />
+      <IvSurface ticker={ticker} />
 
       {loading ? (
         <p className="text-[13px] text-[var(--text-tertiary)]">carregando cadeia…</p>

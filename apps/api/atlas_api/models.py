@@ -120,3 +120,25 @@ class HistoryResponse(BaseModel):
     iv_rank: float | None = None  # where the latest IV sits in the shown window
     provenance: str
     asof: str | None = None
+
+
+class SurfaceExpiry(BaseModel):
+    venc: str
+    dte: int           # calendar days to expiry
+    atm_iv: float      # ATM implied vol for this maturity (the term-structure point)
+
+
+class SurfacePoint(BaseModel):
+    venc: str
+    strike: float
+    moneyness: float   # strike / spot
+    iv: float
+
+
+class SurfaceResponse(BaseModel):
+    ticker: str
+    spot: float | None = None
+    expiries: list[SurfaceExpiry]   # term structure (ATM IV per maturity)
+    points: list[SurfacePoint]      # the full smile x maturity grid
+    provenance: str
+    asof: str | None = None
