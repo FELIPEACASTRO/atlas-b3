@@ -145,11 +145,15 @@ def _recipes(spot: float, calls: list[dict], puts: list[dict]) -> list[tuple]:
     out.append(("Trava de baixa (call credit)", "baixa", True, spread(ac, c5, "short", "long", need_lt=True)))
     if ac and ap:
         out.append(("Compra de straddle", "neutro", False, [_leg_of(ac, "long"), _leg_of(ap, "long")]))
+    if c5 and p5:
+        out.append(("Compra de strangle", "neutro", False, [_leg_of(c5, "long"), _leg_of(p5, "long")]))
     if c5 and c12 and p5 and p12 and c5["strike"] < c12["strike"] and p12["strike"] < p5["strike"]:
         out.append(("Condor de ferro", "neutro", True,
                     [_leg_of(c5, "short"), _leg_of(c12, "long"), _leg_of(p5, "short"), _leg_of(p12, "long")]))
     if c5 and p5:
         out.append(("Strangle vendido", "neutro", False, [_leg_of(c5, "short"), _leg_of(p5, "short")]))
+    if p5:
+        out.append(("Venda de put (renda)", "alta", False, [_leg_of(p5, "short")]))
     return [(n, t, d, legs) for (n, t, d, legs) in out if legs]
 
 
