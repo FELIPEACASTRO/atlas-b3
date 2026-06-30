@@ -16,31 +16,23 @@ def test_health():
     assert r.json()["status"] == "ok"
 
 
-def test_briefing_sample_three_profiles_and_provenance():
-    r = client.get("/briefing/sample")
-    assert r.status_code == 200
-    d = r.json()
-    assert set(d["sizing"]) == {"conservador", "moderado", "agressivo"}
-    assert len(d["case_against"]) >= 1  # honesty: never one-sided
-    assert d["provenance"] and d["asof"]
+def test_no_synthetic_sample_endpoint(monkeypatch):
+    # There is no special /briefing/sample anymore; it falls through to the real
+    # {underlying} route, which has no data without a store -> honest 503.
+    monkeypatch.delenv("ATLAS_DB", raising=False)
+    assert client.get("/briefing/sample").status_code == 503
 
 
-def test_screener_fixture_fallback_has_provenance(monkeypatch):
+def test_screener_without_store_returns_503(monkeypatch):
     monkeypatch.delenv("ATLAS_DB", raising=False)
     r = client.get("/screener")
-    assert r.status_code == 200
-    rows = r.json()
-    assert len(rows) >= 1
-    assert all(row["provenance"] and row["asof"] for row in rows)
+    assert r.status_code == 503  # no store -> honest error, never fixture rows
 
 
-def test_chain_fixture_fallback_has_iv_and_greeks(monkeypatch):
+def test_chain_without_store_returns_503(monkeypatch):
     monkeypatch.delenv("ATLAS_DB", raising=False)
     r = client.get("/chain/PETR4")
-    assert r.status_code == 200
-    rows = r.json()
-    assert len(rows) >= 1
-    assert all(row["iv"] is not None and row["delta"] is not None for row in rows)
+    assert r.status_code == 503  # no synthetic Black-Scholes chain anymore
 
 
 def test_screener_from_real_store(tmp_path, monkeypatch):
@@ -68,13 +60,12 @@ def test_screener_handles_null_ultimo(tmp_path, monkeypatch):
     assert r.json()[0]["ultimo"] is None
 
 
-def test_corrupt_db_falls_back_to_fixture(tmp_path, monkeypatch):
+def test_corrupt_db_returns_503_not_fixture(tmp_path, monkeypatch):
     bad = tmp_path / "bad.db"
     bad.write_text("not a sqlite file")
     monkeypatch.setenv("ATLAS_DB", str(bad))
     r = client.get("/screener")
-    assert r.status_code == 200
-    assert any(row["provenance"].startswith("fixture") for row in r.json())
+    assert r.status_code == 503  # corrupt store -> honest error, never fabricated rows
 
 
 def _seed_real_store(db: str) -> None:

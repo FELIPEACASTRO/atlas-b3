@@ -1,8 +1,8 @@
 """ATLAS API — FastAPI app wiring pricing + analyst + the EOD store.
 
-Serves real COTAHIST-ingested data when ``ATLAS_DB`` points at a populated
-store; otherwise falls back to clearly-labeled fixture data. Honesty holds
-either way: every row carries provenance + asof.
+Serves real COTAHIST-ingested data from the store at ``ATLAS_DB``. There is no
+synthetic/fixture data path: when the store is absent or empty, data endpoints
+return 503 instead of fabricating numbers. Every row carries provenance + asof.
 """
 from __future__ import annotations
 
@@ -18,7 +18,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from atlas_api.agent import chat as chat_agent
-from atlas_api.analyst.briefing import Setup, build_briefing
 from atlas_api.analyst.option_analysis import OptionCtx, analyze_option
 from atlas_api.analyst.setups import call_spread_briefing
 from atlas_api.data import store
@@ -47,13 +46,9 @@ from atlas_api.models import (
 )
 from atlas_api.data.calendar_b3 import year_fraction
 from atlas_api.pricing.american import bjerksund_stensland
-from atlas_api.pricing.bs import bs_greeks, bs_price
-from atlas_api.pricing.iv import implied_vol
 from atlas_api.pricing.risk import SPOT_SHOCKS, payoff_at_expiry, payoff_grid, stress_pnl
 from atlas_api.pricing.rv import realized_vol
 from atlas_api.pricing.signal import iv_rank
-
-_FIXTURE = "fixture (sintético) — sem dado real de mercado ainda"
 
 app = FastAPI(title="ATLAS API", version="0.1.0")
 app.add_middleware(
@@ -84,8 +79,19 @@ def _store_conn():
             return None
         return conn
     except sqlite3.DatabaseError:
-        # corrupted / not a sqlite file -> fall back to the labeled fixture
+        # corrupted / not a sqlite file -> treat as "no real data" (503), never fake
         return None
+
+
+def _require_conn() -> sqlite3.Connection:
+    """Connection to a populated store, or 503 — never a synthetic fallback."""
+    conn = _store_conn()
+    if conn is None:
+        raise HTTPException(
+            status_code=503,
+            detail="sem dado de mercado — defina ATLAS_DB e rode a ingestão (python -m atlas_api.cli update)",
+        )
+    return conn
 
 
 @app.get("/health")
@@ -93,39 +99,10 @@ def health() -> dict:
     return {"status": "ok", "service": "atlas-api"}
 
 
-def _sample_setup() -> Setup:
-    return Setup(
-        ticker="PETRG38", underlying="PETR4", structure="venda_premio",
-        iv=0.42, rv=0.33, max_gain_per_lot=0.62, max_loss_per_lot=0.38,
-        breakeven=38.62, delta=0.30, liquidity_brl=88_000_000, dte=24, capital=60_000,
-    )
-
-
-@app.get("/briefing/sample", response_model=BriefingResponse)
-def briefing_sample() -> BriefingResponse:
-    b = build_briefing(_sample_setup())
-    return BriefingResponse(
-        ticker=b.ticker,
-        setup_facts=b.setup_facts,
-        case_for=b.case_for,
-        case_against=b.case_against,
-        risk_reward=RiskRewardOut(**vars(b.risk_reward)),
-        sizing={k: SizingOut(**vars(v)) for k, v in b.sizing.items()},
-        invalidation=b.invalidation,
-        confidence=b.confidence,
-        verdict=b.verdict,
-        provenance=_FIXTURE,
-        asof=_now(),
-    )
-
-
 @app.get("/summary")
 def summary() -> dict:
     """Real headline metrics for the dashboard (no hardcoded numbers)."""
-    conn = _store_conn()
-    if conn is None:
-        return {"provenance": _FIXTURE, "asof": None, "underlyings": 0,
-                "com_sinal": 0, "rico": 0, "barato": 0, "vol_total": 0.0, "bova11": None}
+    conn = _require_conn()
     rows = store.query_screener(conn, tipo="acao", min_liq=0, limit=10000)
     asof = store.get_meta(conn, "asof") or ""
     conn.close()
@@ -147,9 +124,7 @@ def briefing(underlying: str, capital: float = 50000.0) -> BriefingResponse:
     """Real briefing for a real underlying: a defined-risk call spread built from
     two adjacent strikes of the nearest expiry, with real premiums/IV/RV."""
     underlying = underlying.upper()
-    conn = _store_conn()
-    if conn is None:
-        raise HTTPException(status_code=503, detail="sem store real — defina ATLAS_DB e ingira COTAHIST")
+    conn = _require_conn()
     asof = store.get_meta(conn, "asof") or ""
     try:
         b, err = call_spread_briefing(conn, underlying, capital=capital)
@@ -168,17 +143,7 @@ def briefing(underlying: str, capital: float = 50000.0) -> BriefingResponse:
 
 @app.get("/screener", response_model=list[ScreenerRow])
 def screener() -> list[ScreenerRow]:
-    conn = _store_conn()
-    if conn is None:
-        now = _now()
-        return [
-            ScreenerRow(ticker="PETR4", tipo="acao", ultimo=38.42, var_pct=1.2,
-                        liquidez=1.2e9, provenance=_FIXTURE, asof=now),
-            ScreenerRow(ticker="PETRG38", tipo="call", ultimo=1.15, var_pct=4.5,
-                        liquidez=88e6, iv=0.42, iv_vs_rv="rico", provenance=_FIXTURE, asof=now),
-            ScreenerRow(ticker="VALE3", tipo="acao", ultimo=61.30, var_pct=-0.8,
-                        liquidez=9.8e8, provenance=_FIXTURE, asof=now),
-        ]
+    conn = _require_conn()
     rows = store.query_screener(conn, limit=200)
     asof = store.get_meta(conn, "asof") or ""
     conn.close()
@@ -202,25 +167,7 @@ def screener() -> list[ScreenerRow]:
 
 @app.get("/chain/{underlying}", response_model=list[ChainRow])
 def chain(underlying: str) -> list[ChainRow]:
-    conn = _store_conn()
-    if conn is None:
-        now = _now()
-        spot, r, q, T, sigma = 38.42, 0.105, 0.0, 24 / 252, 0.40
-        rows: list[ChainRow] = []
-        for strike in (36.0, 38.0, 40.0):
-            for kind in ("call", "put"):
-                last = bs_price(kind, spot, strike, r, q, T, sigma)
-                iv = implied_vol(kind, last, spot, strike, r, q, T)
-                g = bs_greeks(kind, spot, strike, r, q, T, sigma)
-                rows.append(ChainRow(
-                    ticker=f"{underlying}{kind[0].upper()}{int(strike)}",
-                    kind=kind, strike=strike, last=round(last, 2),
-                    iv=_nan_to_none(iv), delta=_nan_to_none(g["delta"]),
-                    gamma=_nan_to_none(g["gamma"]), vega=_nan_to_none(g["vega"]),
-                    theta=_nan_to_none(g["theta"] / 252),
-                    provenance=_FIXTURE, asof=now,
-                ))
-        return rows
+    conn = _require_conn()
     store_rows = store.query_chain(conn, underlying)
     asof = store.get_meta(conn, "asof") or ""
     conn.close()
@@ -339,9 +286,7 @@ def _stress_inputs(conn) -> list[tuple[float, float, float, float]]:
 def history(ticker: str, window: int = 21) -> HistoryResponse:
     """Time series of ATM implied vol vs trailing realized vol for an underlying."""
     ticker = ticker.upper()
-    conn = _store_conn()
-    if conn is None:
-        return HistoryResponse(ticker=ticker, points=[], provenance=_FIXTURE, asof=None)
+    conn = _require_conn()
     closes = store.close_series(conn, ticker)
     ivs = dict(store.iv_series(conn, ticker))
     asof = store.get_meta(conn, "asof")
@@ -365,9 +310,7 @@ def history(ticker: str, window: int = 21) -> HistoryResponse:
 def option_panel(ticker: str) -> OptionAnalysisOut:
     """Didactic, two-sided decision panel for a single option series."""
     ticker = ticker.upper()
-    conn = _store_conn()
-    if conn is None:
-        raise HTTPException(status_code=404, detail="sem dado de mercado — defina ATLAS_DB e rode a ingestão")
+    conn = _require_conn()
     opt = store.get_option(conn, ticker)
     if not opt or not opt.get("strike"):
         conn.close()
@@ -397,9 +340,7 @@ def option_panel(ticker: str) -> OptionAnalysisOut:
 def surface(ticker: str) -> SurfaceResponse:
     """IV term structure (ATM IV per maturity) + the full smile x maturity grid."""
     ticker = ticker.upper()
-    conn = _store_conn()
-    if conn is None:
-        return SurfaceResponse(ticker=ticker, expiries=[], points=[], provenance=_FIXTURE)
+    conn = _require_conn()
     rows = store.query_chain(conn, ticker, limit=3000)
     inst = store.get_instrument(conn, ticker)
     asof = store.get_meta(conn, "asof")
@@ -524,10 +465,7 @@ def chat(req: ChatRequest) -> ChatResponse:
     returned from this same EOD store — it cannot invent prices/IV/greeks.
     Analysis, not recommendation; every reply carries provenance + asof.
     """
-    conn = _store_conn()
-    if conn is None:
-        raise HTTPException(status_code=503,
-                            detail="sem dado de mercado — defina ATLAS_DB e rode a ingestão")
+    conn = _require_conn()
     asof = store.get_meta(conn, "asof")
     try:
         res = chat_agent.answer(req.question, req.history, conn=conn)
@@ -550,10 +488,7 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
     Lets the UI render the answer token-by-token and show which tools were
     consulted as they fire. Grounding is identical — numbers only from tools.
     """
-    conn = _store_conn()
-    if conn is None:
-        raise HTTPException(status_code=503,
-                            detail="sem dado de mercado — defina ATLAS_DB e rode a ingestão")
+    conn = _require_conn()
     asof = store.get_meta(conn, "asof")
     prov = f"COTAHIST EOD {asof}" if asof else "COTAHIST EOD"
 
