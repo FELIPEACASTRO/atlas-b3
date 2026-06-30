@@ -9,7 +9,12 @@ type Prediction = {
   asof: string | null;
   sigma: number | null;
   note?: string;
-  market_vs_physical?: { iv: number | null; physical: number; vrp: number };
+  market_vs_physical?: {
+    iv: number | null;
+    physical: number;
+    vrp: number;
+    market_smile?: { atm_vol: number; std_rn: number; dte: number; rmse: number; n_strikes: number } | null;
+  };
   dist?: {
     sigma_phys: number;
     nu: number;
@@ -106,6 +111,7 @@ export function CalibrationPanel({ ticker }: { ticker: string }) {
   }
 
   const mvp = d.market_vs_physical;
+  const mkt = mvp.market_smile;          // densidade de mercado (SVI), quando confiável
   const cal = d.calibration;
   const dist = d.dist;
   const up5 = dist.pop_targets.find((t) => t.moneyness === 1.05);
@@ -119,8 +125,11 @@ export function CalibrationPanel({ ticker }: { ticker: string }) {
       {/* mercado vs nós */}
       <div className="grid gap-2 sm:grid-cols-2">
         <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5">
-          <div className="text-[10.5px] text-[var(--text-tertiary)]">o mercado cobra (IV implícita)</div>
-          <div className="mono text-[18px]" style={{ color: "var(--accent)" }}>{pct(mvp.iv)}</div>
+          <div className="text-[10.5px] text-[var(--text-tertiary)]">o mercado cobra {mkt ? "(smile SVI)" : "(IV implícita)"}</div>
+          <div className="mono text-[18px]" style={{ color: "var(--accent)" }}>{pct(mkt ? mkt.atm_vol : mvp.iv)}</div>
+          {mkt ? (
+            <div className="text-[9.5px] text-[var(--text-tertiary)]">{mkt.n_strikes} strikes · sem arbitragem · densidade RN {pct(mkt.std_rn)}</div>
+          ) : null}
         </div>
         <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5">
           <div className="text-[10.5px] text-[var(--text-tertiary)]">nossa estimativa (vol física, {dist.horizon_days}d)</div>

@@ -184,11 +184,16 @@ def build_prediction(
     base, lev = har_leverage(rv, neg)
     sigma = vol_ensemble([base, lev])                          # média simples (combination puzzle)
 
-    # densidade física: σ_fís = λ·forecast + (1−λ)·IV  (via VRP); coerência F6 por construção
+    # vol de MERCADO: ATM da smile SVI (robusta, fitada a dezenas de strikes) quando confiável;
+    # senão o ponto IV ATM. Usada de forma consistente em mercado/física/gap.
     current_iv = iv_history[-1] if iv_history else None
-    sigma_iv = current_iv if current_iv is not None else sigma
-    vrp = sigma_iv - sigma
+    smile = _market_smile(chain, spot, asof, T_days)
+    market_vol = smile["atm_vol"] if smile else current_iv
+    sigma_iv = market_vol if market_vol is not None else sigma
+    # densidade física: σ_fís = λ·forecast + (1−λ)·mercado (via VRP); coerência F6 por construção
+    vrp = sigma_iv - sigma                              # VRP cru (mercado − previsão) — p/ regime e densidade
     dens = physical_density(spot=spot, sigma_iv=sigma_iv, rv=sigma, vrp=vrp, T=T_days / 365.0, lam=lam)
+    gap = round(sigma_iv - dens.sigma, 4)              # gap exibido: mercado − densidade física servida
     # calibração + recalibrador isotônico online p/ servir (validado no dado real)
     cal, r_serve = _calibration(rv, closes)
     pop_targets = [
@@ -211,15 +216,14 @@ def build_prediction(
     term_slope, skew = _term_and_skew(chain, spot)
     reg = strategy_bias(regime(ivr, vrp, term_slope, skew))
 
-    smile = _market_smile(chain, spot, asof, T_days)            # densidade de mercado (SVI), se confiável
-
     return {
         **base_out,
         "sigma": round(sigma, 4),
         "market_vs_physical": {
-            "iv": round(sigma_iv, 4) if sigma_iv is not None else None,
+            "iv": round(sigma_iv, 4) if sigma_iv is not None else None,   # vol de mercado (SVI quando confiável)
             "physical": round(dens.sigma, 4),
-            "vrp": round(vrp, 4),
+            "vrp": gap,                     # mercado − densidade física (consistente com os dois cards)
+            "iv_point": round(current_iv, 4) if current_iv is not None else None,  # ponto IV ATM (transparência)
             "market_smile": smile,          # ATM/densidade RN da SVI (None se a smile não é confiável)
         },
         "dist": dist,
