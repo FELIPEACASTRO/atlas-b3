@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { LineChart, Flame, Snowflake, BarChart3 } from "lucide-react";
 
+import { InfoTip } from "@/components/info-tip";
+
 type Summary = {
   provenance: string;
   asof: string | null;
@@ -41,10 +43,36 @@ export function MetricCards() {
   }, []);
 
   const cards = [
-    { label: "BOVA11 (ETF Ibov)", value: s?.bova11 != null ? s.bova11.toFixed(2) : "—", icon: LineChart, tint: "var(--text-secondary)" },
-    { label: "Vol cara (heur.)", value: s ? String(s.rico) : "—", sub: s ? `/ ${s.com_sinal}` : undefined, accent: true, icon: Flame, tint: "var(--accent)" },
-    { label: "Vol barata (heur.)", value: s ? String(s.barato) : "—", icon: Snowflake, tint: "var(--up)" },
-    { label: "Vol. do dia", value: s ? fmtVol(s.vol_total) : "—", icon: BarChart3, tint: "var(--text-secondary)" },
+    {
+      label: "BOVA11 (ETF Ibov)",
+      value: s?.bova11 != null ? s.bova11.toFixed(2) : "—",
+      icon: LineChart,
+      tint: "var(--text-secondary)",
+      tip: "BOVA11 é o ETF que segue o Ibovespa — o principal índice da Bolsa, um termômetro geral do mercado. O valor é o preço de fechamento do dia (EOD), em reais.",
+    },
+    {
+      label: "Vol cara (heur.)",
+      value: s ? String(s.rico) : "—",
+      sub: s ? `/ ${s.com_sinal}` : undefined,
+      accent: true,
+      icon: Flame,
+      tint: "var(--accent)",
+      tip: "Quantos ativos estão hoje com a volatilidade CARA (IV implícita acima da RV realizada) — o prêmio das opções está 'gordo', terreno de quem vende. O número após a barra ('/') é o total de ativos com sinal de vol no dia. Heurística, não recomendação.",
+    },
+    {
+      label: "Vol barata (heur.)",
+      value: s ? String(s.barato) : "—",
+      icon: Snowflake,
+      tint: "var(--up)",
+      tip: "Quantos ativos estão hoje com a volatilidade BARATA (IV implícita abaixo da RV realizada) — as opções estão baratas frente ao que o ativo oscilou, terreno de quem compra. Heurística, não recomendação.",
+    },
+    {
+      label: "Vol. do dia",
+      value: s ? fmtVol(s.vol_total) : "—",
+      icon: BarChart3,
+      tint: "var(--text-secondary)",
+      tip: "Volume financeiro total negociado no dia, somando todos os ativos (a liquidez do mercado). Quanto maior, mais fácil entrar e sair de posições sem mexer muito no preço.",
+    },
   ];
 
   return (
@@ -59,7 +87,10 @@ export function MetricCards() {
               style={{ animationDelay: `${i * 60}ms` }}
             >
               <div className="mb-1.5 flex items-center justify-between">
-                <span className="text-[12px] text-[var(--text-secondary)]">{c.label}</span>
+                <span className="inline-flex items-center gap-1 text-[12px] text-[var(--text-secondary)]">
+                  {c.label}
+                  <InfoTip text={c.tip} />
+                </span>
                 <span className="grid h-6 w-6 place-items-center rounded-md" style={{ background: "color-mix(in oklch, " + c.tint + " 14%, transparent)", color: c.tint }}>
                   <Icon size={13} />
                 </span>
