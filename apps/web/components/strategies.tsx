@@ -10,6 +10,7 @@ type Strategy = {
   vol_stance: string;
   lots: number;
   sizing: { conservador: number; moderado: number; agressivo: number };
+  per_lot: { cost: number; max_loss: number; max_gain: number; ev: number };
   cost: number;
   max_loss: number;
   max_gain: number;
@@ -50,6 +51,7 @@ export function Strategies() {
   const [capital, setCapital] = useState(20000);
   const [prazo, setPrazo] = useState(30);
   const [visao, setVisao] = useState("alta");
+  const [perfil, setPerfil] = useState<"conservador" | "moderado" | "agressivo">("moderado");
   const [d, setD] = useState<Resp | null>(null);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(true);
@@ -143,9 +145,24 @@ export function Strategies() {
         <p className="text-[12px] text-[var(--text-secondary)]">{d.note ?? "sem estratégias para esta cadeia."}</p>
       ) : null}
 
+      {d && d.strategies.length ? (
+        <div className="mb-2.5 flex items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
+          <span>perfil de risco:</span>
+          {(["conservador", "moderado", "agressivo"] as const).map((p) => (
+            <button key={p} type="button" onClick={() => setPerfil(p)}
+              className="rounded-md border px-2 py-0.5 text-[11px] capitalize"
+              style={perfil === p
+                ? { background: "color-mix(in oklch, var(--accent) 16%, transparent)", color: "var(--accent)", borderColor: "color-mix(in oklch, var(--accent) 40%, var(--border-subtle))" }
+                : { borderColor: "var(--border-subtle)", color: "var(--text-secondary)" }}>
+              {p}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       <div className="space-y-2.5">
         {(d?.strategies ?? []).map((s, i) => (
-          <StrategyCard key={s.name} s={s} top={i === 0} />
+          <StrategyCard key={s.name} s={s} top={i === 0} perfil={perfil} />
         ))}
       </div>
 
@@ -159,8 +176,12 @@ export function Strategies() {
   );
 }
 
-function StrategyCard({ s, top }: { s: Strategy; top: boolean }) {
-  const evUp = s.ev >= 0;
+function StrategyCard({ s, top, perfil }: { s: Strategy; top: boolean; perfil: "conservador" | "moderado" | "agressivo" }) {
+  const lots = s.sizing[perfil];
+  const ev = s.per_lot.ev * lots;
+  const maxLoss = s.per_lot.max_loss * lots;
+  const maxGain = s.per_lot.max_gain * lots;
+  const evUp = ev >= 0;
   return (
     <div className="rounded-xl border p-3" style={{ borderColor: top ? "color-mix(in oklch, var(--accent) 45%, var(--border-subtle))" : "var(--border-subtle)" }}>
       <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
@@ -172,7 +193,7 @@ function StrategyCard({ s, top }: { s: Strategy; top: boolean }) {
         </div>
         <div className="flex items-center gap-3 text-[12px]">
           <span className="text-[var(--text-tertiary)]">POP <b className="mono" style={{ color: "var(--text-primary)" }}>{Math.round(s.pop * 100)}%</b></span>
-          <span className="text-[var(--text-tertiary)]">EV <b className="mono" style={{ color: evUp ? "var(--up)" : "var(--down)" }}>{evUp ? "+" : ""}{brl(s.ev)}</b></span>
+          <span className="text-[var(--text-tertiary)]">EV <b className="mono" style={{ color: evUp ? "var(--up)" : "var(--down)" }}>{evUp ? "+" : ""}{brl(ev)}</b></span>
         </div>
       </div>
       <div className="mb-1.5 flex flex-wrap gap-1.5">
@@ -187,9 +208,9 @@ function StrategyCard({ s, top }: { s: Strategy; top: boolean }) {
         <p className="mb-1.5 text-[11.5px] leading-relaxed text-[var(--text-secondary)]">{s.rationale}</p>
       ) : null}
       <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-[var(--text-tertiary)]">
-        <span>lotes <span className="text-[9.5px]">(cons/mod/agr)</span>: <b className="mono" style={{ color: "var(--text-secondary)" }}>{s.sizing.conservador}/{s.sizing.moderado}/{s.sizing.agressivo}</b></span>
-        <span>risco máx <span className="text-[9.5px]">(mod)</span>: <b className="mono" style={{ color: "var(--down)" }}>{brl(s.max_loss)}</b></span>
-        <span>ganho máx: <b className="mono" style={{ color: "var(--up)" }}>{s.defined_risk ? brl(s.max_gain) : "alto"}</b></span>
+        <span>lotes <span className="text-[9.5px]">({perfil})</span>: <b className="mono" style={{ color: "var(--text-secondary)" }}>{lots}</b></span>
+        <span>risco máx: <b className="mono" style={{ color: "var(--down)" }}>{brl(maxLoss)}</b></span>
+        <span>ganho máx: <b className="mono" style={{ color: "var(--up)" }}>{s.defined_risk ? brl(maxGain) : "alto"}</b></span>
         {s.breakevens.length ? <span>breakeven: <b className="mono" style={{ color: "var(--text-secondary)" }}>{s.breakevens.join(" / ")}</b></span> : null}
       </div>
     </div>

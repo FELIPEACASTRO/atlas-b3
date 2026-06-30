@@ -185,6 +185,8 @@ def build_catalog(spot: float, dens: Density, chain: list[dict], *, visao: str,
             "vol_stance": "vender" if any(leg.action == "short" for leg in legs) and e1["cost"] <= 0 else "comprar",
             "legs": [{"kind": leg.kind, "action": leg.action, "strike": leg.strike, "premium": leg.premium} for leg in legs],
             "pop": e1["pop"], "breakevens": e1["breakevens"],       # independentes do nº de lotes
+            # métricas por 1 lote — o front escala pelo perfil escolhido (lots = sizing[perfil])
+            "per_lot": {"cost": e1["cost"], "max_loss": e1["max_loss"], "max_gain": e1["max_gain"], "ev": e1["ev"]},
             "cost": round(e1["cost"] * lots, 2), "max_loss": round(e1["max_loss"] * lots, 2),
             "max_gain": round(e1["max_gain"] * lots, 2), "ev": round(e1["ev"] * lots, 2),
         })
