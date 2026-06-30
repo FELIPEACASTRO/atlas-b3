@@ -18,6 +18,12 @@ from atlas_api.data import store
 _TICKER_RE = re.compile(r"\b[A-Z]{4,6}\d{1,4}\b")
 _CHEAP_WORDS = ("barat", "barao", "baratas", "baratos")
 _RICH_WORDS = ("cara", "caro", "caras", "caros", "rica", "rico")
+_SOLUTION_WORDS = (
+    "soluç", "soluc", "atlas", "cobertura", "o que voc", "o que vc", "o que você", "o que vocês",
+    "como funciona", "quais ativ", "quais aç", "quantos ativ", "quantas opç", "quantas aç",
+    "disponiv", "disponív", "na base", "nossa", "do sistema", "da plataforma", "no sistema",
+    "o que tem", "o que da pra", "o que dá pra", "o que sabe", "módulos", "modulos",
+)
 _HELP = (
     "Posso responder com os números reais da base (COTAHIST EOD). Exemplos do que entendo agora:\n"
     "• \"como está a PETR4?\" — retrato do ativo (IV, IV Rank, VRP, vol)\n"
@@ -72,6 +78,24 @@ def _option_text(conn, ticker: str) -> str:
     ])
 
 
+def _solution_text(conn) -> str:
+    s = tools.solution_overview(conn)
+    d = s["dados"]
+    mods = "\n".join(f"• **{m['nome']}** — {m['descricao']}" for m in s["modulos"])
+    liq = ", ".join(m["ticker"] for m in s["mais_liquidos"][:5])
+    return "\n".join([
+        s["o_que_e"],
+        f"\n**Dados** ({d['fonte']}): {d['subjacentes']} subjacentes "
+        f"({d['acoes']} ações + {d['indices']} índices) e {d['opcoes']} opções; "
+        f"{d['sessoes_historico']} pregões de histórico ({d['periodo'][0]} a {d['periodo'][1]}).",
+        f"**Cobertura**: {s['cobertura']}",
+        f"**Mais líquidos hoje**: {liq}.",
+        "\n**Módulos:**", mods,
+        "\nPode pedir, por exemplo: \"calls baratas da PETR4\", \"vale a pena a PETRA38?\" "
+        "ou \"a vol da VALE3 está cara?\".",
+    ])
+
+
 def _screen_text(conn, signal: str | None) -> str:
     order = "iv_rank_desc" if signal == "rico" else "iv_rank_asc" if signal == "barato" else "iv_rank_desc"
     res = tools.screen_underlyings(conn, signal=signal, order=order, limit=8)
@@ -119,5 +143,10 @@ def answer(question: str, conn) -> tuple[str, list[dict], str | None]:
     if any(w in ql for w in _RICH_WORDS):
         tool_calls.append({"name": "screen_underlyings", "args": {"signal": "rico"}})
         return _screen_text(conn, "rico"), tool_calls, note
+
+    # questions about the solution itself (what is ATLAS, coverage, what's in the base)
+    if any(w in ql for w in _SOLUTION_WORDS):
+        tool_calls.append({"name": "solution_overview", "args": {}})
+        return _solution_text(conn), tool_calls, note
 
     return _HELP, tool_calls, note

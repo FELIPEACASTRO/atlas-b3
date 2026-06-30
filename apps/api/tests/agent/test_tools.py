@@ -43,6 +43,15 @@ def test_vol_history_window(conn):
     assert v["iv_rank_janela"] is not None      # latest IV is the max -> ~100
 
 
+def test_solution_overview_describes_the_base(conn):
+    s = tools.solution_overview(conn)
+    assert s["dados"]["acoes"] >= 1 and s["dados"]["opcoes"] == 2  # PETR4 + 2 calls
+    assert s["dados"]["sessoes_historico"] == 15                    # 15 seeded sessions
+    assert any(m["nome"] == "Chat" for m in s["modulos"])           # describes its own modules
+    assert s["mais_liquidos"][0]["ticker"] == "PETR4"              # most liquid first
+    assert "Bjerksund" in s["cobertura"] and "IBOV" in s["cobertura"]
+
+
 def test_dispatch_unknown_and_bad_args_never_raise(conn):
     assert "error" in tools.dispatch(conn, "nope", {})
     assert "error" in tools.dispatch(conn, "underlying_snapshot", {"bogus": 1})

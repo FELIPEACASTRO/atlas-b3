@@ -19,6 +19,13 @@ def test_vol_cara_routes_to_ranking(conn):
     assert calls[0]["name"] == "screen_underlyings"
 
 
+def test_solution_question_routes_to_overview(conn):
+    # the exact phrasing from the bug report ("os melhores disponíveis em nossa solução")
+    text, calls, _ = fallback.answer("quero saber os melhores disponiveis em nossa solucao", conn)
+    assert calls and calls[0]["name"] == "solution_overview"
+    assert "Módulos" in text and "Chat" in text and "COTAHIST" in text
+
+
 def test_unparseable_question_returns_help_with_key_hint(conn):
     text, calls, note = fallback.answer("oi, tudo certo por aí?", conn)
     assert "gratuita" in text and ("OpenRouter" in text or "Gemini" in text)

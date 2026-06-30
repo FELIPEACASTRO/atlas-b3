@@ -235,6 +235,50 @@ def vol_history(conn, *, ticker: str, window: int = 21) -> dict:
     }
 
 
+def solution_overview(conn) -> dict:
+    """What ATLAS is + what's in the base (live counts), so the chat can explain
+    the solution itself — modules, data coverage, models, most-liquid names."""
+    asof = store.get_meta(conn, "asof")
+    hist = conn.execute(
+        "SELECT COUNT(DISTINCT date) n, MIN(date) a, MAX(date) b FROM prices_daily").fetchone()
+    n_acoes = conn.execute("SELECT COUNT(*) FROM instruments WHERE tipo='acao'").fetchone()[0]
+    n_indices = conn.execute("SELECT COUNT(*) FROM instruments WHERE tipo='indice'").fetchone()[0]
+    n_opcoes = conn.execute("SELECT COUNT(*) FROM options").fetchone()[0]
+    liq = [r for r in store.query_screener(conn, limit=10000) if r["tipo"] in _UNDERLYING_TIPOS]
+    liq.sort(key=lambda r: r.get("liquidez") or 0, reverse=True)
+    mais_liquidos = [{"ticker": r["ticker"], "ultimo": _r(r.get("ultimo"), 2),
+                      "liquidez": _r(r.get("liquidez"), 0)} for r in liq[:6]]
+    return {
+        "asof": asof,
+        "o_que_e": ("ATLAS — terminal local de apoio à decisão para opções da B3. Mostra fatos e "
+                    "análise transparente (cada número com proveniência e data 'asof'), nunca "
+                    "profecia; não dá ordem de compra/venda — a decisão é sempre do usuário."),
+        "modulos": [
+            {"nome": "Radar / Screener", "descricao": "panorama do dia: IV, IV Rank, VRP, sinal "
+             "IV-vs-RV (rico/barato), liquidez e filtros"},
+            {"nome": "Opções", "descricao": "cadeia com IV e gregas, gráfico IV vs RV, superfície "
+             "de volatilidade e um painel por opção (prós/contras, comprar vs vender)"},
+            {"nome": "Carteira", "descricao": "posições, risco líquido (delta/gamma/vega/theta), "
+             "stress de mercado e diagrama de payoff (hoje vs no vencimento)"},
+            {"nome": "Analista", "descricao": "briefing honesto por ativo, com os dois lados e "
+             "3 perfis de risco"},
+            {"nome": "Chat", "descricao": "este assistente — responde em linguagem natural, "
+             "sempre ancorado nestes mesmos dados reais"},
+        ],
+        "dados": {
+            "fonte": "COTAHIST EOD (fechamento de mercado, B3)",
+            "subjacentes": n_acoes + n_indices, "acoes": n_acoes, "indices": n_indices,
+            "opcoes": n_opcoes, "sessoes_historico": hist["n"],
+            "periodo": [hist["a"], hist["b"]],
+        },
+        "cobertura": ("opções sobre ações (americanas, modelo Bjerksund-Stensland) e sobre o "
+                      "Ibovespa/IBOV (europeias). Fora de escopo: futuros (WIN/WDO/DI1) e intraday."),
+        "modelos": ("Black-Scholes, IV com filtro econômico, gregas, vol realizada (Yang-Zhang/HAR), "
+                    "VRP, IV Rank e risco de carteira (delta-gamma-vega)."),
+        "mais_liquidos": mais_liquidos,
+    }
+
+
 # --- registry + schemas ----------------------------------------------------
 
 _REGISTRY: dict[str, Callable[..., dict]] = {
@@ -243,6 +287,7 @@ _REGISTRY: dict[str, Callable[..., dict]] = {
     "search_options": search_options,
     "analyze_option": analyze_option,
     "vol_history": vol_history,
+    "solution_overview": solution_overview,
 }
 
 TOOL_SCHEMAS: list[dict] = [
@@ -318,6 +363,17 @@ TOOL_SCHEMAS: list[dict] = [
             },
             "required": ["ticker"],
         },
+    },
+    {
+        "name": "solution_overview",
+        "description": "O que é o ATLAS e o que existe na base agora: módulos (Radar/Screener, "
+                       "Opções, Carteira, Analista, Chat), dados (fonte, nº de ações/índices/opções, "
+                       "quantos pregões de histórico e o período), cobertura, modelos usados e os "
+                       "ativos mais líquidos. USE quando perguntarem sobre A PRÓPRIA SOLUÇÃO: o que "
+                       "você faz, o que é o ATLAS, quais dados/ativos/opções existem, o que há de "
+                       "'melhor/maior/mais líquido' na nossa base/solução, qual a cobertura, ou como "
+                       "funciona. Não precisa de parâmetros.",
+        "input_schema": {"type": "object", "properties": {}},
     },
 ]
 
