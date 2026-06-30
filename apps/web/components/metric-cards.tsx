@@ -42,8 +42,8 @@ export function MetricCards() {
 
   const cards = [
     { label: "BOVA11 (ETF Ibov)", value: s?.bova11 != null ? s.bova11.toFixed(2) : "—", icon: LineChart, tint: "var(--text-secondary)" },
-    { label: "IV rica (heur.)", value: s ? String(s.rico) : "—", sub: s ? `/ ${s.com_sinal}` : undefined, accent: true, icon: Flame, tint: "var(--accent)" },
-    { label: "IV barata (heur.)", value: s ? String(s.barato) : "—", icon: Snowflake, tint: "var(--up)" },
+    { label: "Vol cara (heur.)", value: s ? String(s.rico) : "—", sub: s ? `/ ${s.com_sinal}` : undefined, accent: true, icon: Flame, tint: "var(--accent)" },
+    { label: "Vol barata (heur.)", value: s ? String(s.barato) : "—", icon: Snowflake, tint: "var(--up)" },
     { label: "Vol. do dia", value: s ? fmtVol(s.vol_total) : "—", icon: BarChart3, tint: "var(--text-secondary)" },
   ];
 

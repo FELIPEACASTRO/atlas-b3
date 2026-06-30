@@ -39,14 +39,14 @@ function tipoLabel(t: string): string {
 function SigBadge({ sig }: { sig: string | null }) {
   if (sig === "rico")
     return (
-      <span className="rounded px-2 py-0.5 text-[11px]" style={{ background: "color-mix(in oklch, var(--accent) 18%, transparent)", color: "var(--accent)" }}>
-        Rico
+      <span className="whitespace-nowrap rounded px-2 py-0.5 text-[11px]" style={{ background: "color-mix(in oklch, var(--accent) 18%, transparent)", color: "var(--accent)" }}>
+        Vol cara
       </span>
     );
   if (sig === "barato")
     return (
-      <span className="rounded px-2 py-0.5 text-[11px]" style={{ background: "color-mix(in oklch, var(--up) 18%, transparent)", color: "var(--up)" }}>
-        Barato
+      <span className="whitespace-nowrap rounded px-2 py-0.5 text-[11px]" style={{ background: "color-mix(in oklch, var(--up) 18%, transparent)", color: "var(--up)" }}>
+        Vol barata
       </span>
     );
   return <span className="text-[var(--text-tertiary)]">—</span>;
@@ -158,8 +158,8 @@ export function ScreenerTable({ limit = 40 }: { limit?: number }) {
         />
         <div className="flex gap-1.5">
           {chip("all", "Todos")}
-          {chip("rico", "Rico")}
-          {chip("barato", "Barato")}
+          {chip("rico", "Vol cara")}
+          {chip("barato", "Vol barata")}
         </div>
       </div>
       {loading ? (
@@ -186,7 +186,7 @@ export function ScreenerTable({ limit = 40 }: { limit?: number }) {
                   <SortTh label="VRP" col="vrp" sort={sort} onSort={toggleSort} tip="Prêmio de variância = IV − RV, em pontos de vol. Positivo = implícita acima da realizada (você é pago por vender volatilidade)." />
                   <th className="px-4 py-2.5 text-right font-normal">
                     <span className="inline-flex items-center gap-1">IV vs RV
-                      <InfoTip text="Heurística (não recomendação): IV implícita vs RV realizada. Rico = IV > RV; Barato = IV < RV." />
+                      <InfoTip text="Heurística (não recomendação): IV implícita vs RV realizada. Vol cara = IV > RV; vol barata = IV < RV." />
                     </span>
                   </th>
                 </tr>
@@ -223,10 +223,10 @@ export function ScreenerTable({ limit = 40 }: { limit?: number }) {
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-4 text-[11.5px] text-[var(--text-tertiary)]">
             <span className="flex items-center gap-1.5">
-              <i className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "var(--accent)" }} /> Rico = IV &gt; RV
+              <i className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "var(--accent)" }} /> Vol cara = IV &gt; RV
             </span>
             <span className="flex items-center gap-1.5">
-              <i className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "var(--up)" }} /> Barato = IV &lt; RV
+              <i className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "var(--up)" }} /> Vol barata = IV &lt; RV
             </span>
             <span>{filtered.length} de {view.length} ativos · clique num cabeçalho para ordenar</span>
             <span className="ml-auto">fonte: {provenance || "—"} · heurística, não recomendação</span>
