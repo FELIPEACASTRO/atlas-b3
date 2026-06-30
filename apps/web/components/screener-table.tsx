@@ -90,8 +90,14 @@ export function ScreenerTable() {
         className="mb-3 w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2 text-[13px] outline-none"
         style={{ color: "var(--text-primary)" }}
       />
-      <div className="overflow-hidden rounded-xl border border-[var(--border-subtle)]">
-        <table className="w-full text-[13px]">
+      {provenance.toLowerCase().startsWith("fixture") ? (
+        <div className="mb-3 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px]"
+          style={{ background: "color-mix(in oklch, var(--accent) 14%, transparent)", color: "var(--accent)" }}>
+          mostrando exemplo — API offline (não é o mercado real)
+        </div>
+      ) : null}
+      <div className="overflow-x-auto rounded-xl border border-[var(--border-subtle)]">
+        <table className="w-full min-w-[760px] text-[13px]">
           <thead>
             <tr className="bg-[var(--bg-surface)] text-left text-[var(--text-secondary)]">
               <th className="px-4 py-2.5 font-normal">Ativo</th>

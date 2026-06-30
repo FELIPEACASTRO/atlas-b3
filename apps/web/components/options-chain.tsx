@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { VolHistory } from "@/components/vol-history";
 import { IvSurface } from "@/components/iv-surface";
 import { OptionPanel } from "@/components/option-panel";
+import { InfoTip } from "@/components/info-tip";
 
 type Row = {
   ticker: string;
@@ -40,6 +41,7 @@ export function OptionsChain() {
     const t = new URLSearchParams(window.location.search).get("t");
     if (t) {
       const u = t.toUpperCase();
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time deep-link sync from the URL
       setTicker(u);
       setInput(u);
     }
@@ -47,6 +49,7 @@ export function OptionsChain() {
 
   useEffect(() => {
     let alive = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset loading when the ticker changes
     setLoading(true);
     fetch(`${API}/chain/${ticker}`)
       .then((r) => r.json())
@@ -117,19 +120,19 @@ export function OptionsChain() {
         </p>
       ) : (
         <>
-          <div className="overflow-hidden rounded-xl border border-[var(--border-subtle)]">
-            <table className="w-full text-[13px]">
+          <div className="overflow-x-auto rounded-xl border border-[var(--border-subtle)]">
+            <table className="w-full min-w-[640px] text-[13px]">
               <thead>
                 <tr className="bg-[var(--bg-surface)] text-left text-[var(--text-secondary)]">
                   <th className="px-4 py-2.5 font-normal">Série</th>
                   <th className="px-3 py-2.5 font-normal">Tipo</th>
-                  <th className="px-3 py-2.5 text-right font-normal">Strike</th>
-                  <th className="px-3 py-2.5 text-right font-normal">Último</th>
-                  <th className="px-3 py-2.5 text-right font-normal">IV</th>
-                  <th className="px-3 py-2.5 text-right font-normal">Δ</th>
-                  <th className="px-3 py-2.5 text-right font-normal">Γ</th>
-                  <th className="px-3 py-2.5 text-right font-normal">Vega</th>
-                  <th className="px-4 py-2.5 text-right font-normal">θ/dia</th>
+                  <ColHead label="Strike" tip="Preço combinado: o valor pelo qual a opção dá direito de comprar (call) ou vender (put) o ativo." />
+                  <ColHead label="Último" tip="Prêmio: o preço pago (comprador) ou recebido (vendedor) por 1 opção hoje." />
+                  <ColHead label="IV" tip="Volatilidade implícita: o 'nervosismo' que o mercado embute no preço da opção (% ao ano)." />
+                  <ColHead label="Δ" tip="Delta: quanto o preço da opção sobe (aprox.) se o ativo subir R$1. Também ≈ a chance de virar exercício." />
+                  <ColHead label="Γ" tip="Gama: o quão rápido o Delta muda quando o ativo se mexe." />
+                  <ColHead label="Vega" tip="Vega: quanto a opção ganha/perde se a volatilidade subir 1 ponto." />
+                  <ColHead label="θ/dia" tip="Theta: o desgaste do tempo — quanto a opção perde por dia, só pelo calendário." last />
                 </tr>
               </thead>
               <tbody>
@@ -166,5 +169,15 @@ export function OptionsChain() {
 
       {openOpt ? <OptionPanel ticker={openOpt} onClose={() => setOpenOpt(null)} /> : null}
     </div>
+  );
+}
+
+function ColHead({ label, tip, last }: { label: string; tip: string; last?: boolean }) {
+  return (
+    <th className={`${last ? "px-4" : "px-3"} py-2.5 text-right font-normal`}>
+      <span className="inline-flex items-center justify-end gap-1">
+        {label} <InfoTip text={tip} />
+      </span>
+    </th>
   );
 }

@@ -35,6 +35,7 @@ export function OptionPanel({ ticker, onClose }: { ticker: string; onClose: () =
 
   useEffect(() => {
     let alive = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset panel when the ticker changes
     setA(null); setErr("");
     fetch(`${API}/option/${ticker}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(r)))
