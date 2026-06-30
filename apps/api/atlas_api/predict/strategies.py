@@ -78,3 +78,78 @@ def evaluate(legs: list[Leg], dens: Density, spot: float, *, mult: int = 100, lo
         "pop": round(pop, 4),
         "breakevens": [round(b, 2) for b in _breakevens(s, pnl)],
     }
+
+
+# ---- Catálogo de estratégias (build_catalog) ----
+
+def _nearest(opts: list[dict], target: float) -> dict | None:
+    return min(opts, key=lambda o: abs(o["strike"] - target)) if opts else None
+
+
+def _leg_of(o: dict, action: str) -> Leg:
+    return Leg(o["kind"], action, float(o["strike"]), float(o["last"]))
+
+
+def _recipes(spot: float, calls: list[dict], puts: list[dict]) -> list[tuple]:
+    """(nome, tese, defined_risk, legs|None) p/ as estruturas montáveis da cadeia real."""
+    ac, ap = _nearest(calls, spot), _nearest(puts, spot)               # ATM
+    c5, c12 = _nearest(calls, spot * 1.05), _nearest(calls, spot * 1.12)
+    p5, p12 = _nearest(puts, spot * 0.95), _nearest(puts, spot * 0.88)
+
+    def spread(a, b, a_act, b_act, *, need_lt):
+        if a is None or b is None or a["strike"] == b["strike"]:
+            return None
+        if need_lt and not (a["strike"] < b["strike"]):
+            return None
+        return [_leg_of(a, a_act), _leg_of(b, b_act)]
+
+    out: list[tuple] = []
+    if ac:
+        out.append(("Compra de call", "alta", False, [_leg_of(ac, "long")]))
+    out.append(("Trava de alta (call debit)", "alta", True, spread(ac, c5, "long", "short", need_lt=True)))
+    out.append(("Trava de alta (put credit)", "alta", True, spread(p12, p5, "long", "short", need_lt=True)))
+    if ap:
+        out.append(("Compra de put", "baixa", False, [_leg_of(ap, "long")]))
+    out.append(("Trava de baixa (put debit)", "baixa", True, spread(p5, ap, "long", "short", need_lt=True)))
+    out.append(("Trava de baixa (call credit)", "baixa", True, spread(ac, c5, "short", "long", need_lt=True)))
+    if ac and ap:
+        out.append(("Compra de straddle", "neutro", False, [_leg_of(ac, "long"), _leg_of(ap, "long")]))
+    if c5 and c12 and p5 and p12 and c5["strike"] < c12["strike"] and p12["strike"] < p5["strike"]:
+        out.append(("Condor de ferro", "neutro", True,
+                    [_leg_of(c5, "short"), _leg_of(c12, "long"), _leg_of(p5, "short"), _leg_of(p12, "long")]))
+    if c5 and p5:
+        out.append(("Strangle vendido", "neutro", False, [_leg_of(c5, "short"), _leg_of(p5, "short")]))
+    return [(n, t, d, legs) for (n, t, d, legs) in out if legs]
+
+
+def build_catalog(spot: float, dens: Density, chain: list[dict], *, visao: str,
+                  capital: float, mult: int = 100) -> list[dict]:
+    """Catálogo de estratégias da cadeia real, avaliadas por POP/EV e ordenadas pela tese.
+
+    ``visao`` ∈ {alta, baixa, neutro, renda}. Sizing: risco definido cabe no ``capital``;
+    naked (risco ilimitado) é sinalizado e dimensionado por margem aproximada. EV usa a
+    densidade física → ranqueia por edge real (estruturas de venda sobem quando a vol é cara).
+    """
+    calls = sorted([o for o in chain if o.get("kind") == "call" and o.get("strike") and o.get("last") and o["last"] > 0], key=lambda o: o["strike"])
+    puts = sorted([o for o in chain if o.get("kind") == "put" and o.get("strike") and o.get("last") and o["last"] > 0], key=lambda o: o["strike"])
+    want = "neutro" if visao == "renda" else visao
+    results: list[dict] = []
+    for name, thesis, defined, legs in _recipes(spot, calls, puts):
+        ev1 = evaluate(legs, dens, spot, mult=mult, lots=1)
+        per_lot_loss = abs(ev1["max_loss"]) or 1.0
+        if defined:
+            lots = int(capital // per_lot_loss)
+        else:
+            lots = int(capital // (spot * mult * 0.20))             # margem aproximada p/ naked
+        if lots < 1:
+            continue
+        ev = evaluate(legs, dens, spot, mult=mult, lots=lots)
+        results.append({
+            "name": name, "thesis": thesis, "defined_risk": defined, "lots": lots,
+            "vol_stance": "vender" if any(leg.action == "short" for leg in legs) and ev["cost"] <= 0 else "comprar",
+            "legs": [{"kind": leg.kind, "action": leg.action, "strike": leg.strike, "premium": leg.premium} for leg in legs],
+            **ev,
+        })
+    # ranqueia: estruturas que casam com a tese primeiro, depois maior valor esperado
+    results.sort(key=lambda s: (s["thesis"] == want, s["ev"]), reverse=True)
+    return results
