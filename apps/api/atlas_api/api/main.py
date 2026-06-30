@@ -19,6 +19,8 @@ from atlas_api.data import store
 from atlas_api.models import (
     BriefingResponse,
     ChainRow,
+    HistoryPoint,
+    HistoryResponse,
     PortfolioSummary,
     PositionIn,
     PositionRow,
@@ -32,6 +34,7 @@ from atlas_api.pricing.bs import bs_greeks, bs_price
 from atlas_api.pricing.iv import implied_vol
 from atlas_api.pricing.risk import SPOT_SHOCKS, stress_pnl
 from atlas_api.pricing.rv import realized_vol
+from atlas_api.pricing.signal import iv_rank
 
 _FIXTURE = "fixture (sintético) — sem dado real de mercado ainda"
 
@@ -343,6 +346,32 @@ def _stress_inputs(conn) -> list[tuple[float, float, float, float]]:
         else:
             out.append((qty, 0.0, 0.0, inst["ultimo"] or 0.0))  # stock: delta=qty
     return out
+
+
+@app.get("/history/{ticker}", response_model=HistoryResponse)
+def history(ticker: str, window: int = 21) -> HistoryResponse:
+    """Time series of ATM implied vol vs trailing realized vol for an underlying."""
+    ticker = ticker.upper()
+    conn = _store_conn()
+    if conn is None:
+        return HistoryResponse(ticker=ticker, points=[], provenance=_FIXTURE, asof=None)
+    closes = store.close_series(conn, ticker)
+    ivs = dict(store.iv_series(conn, ticker))
+    asof = store.get_meta(conn, "asof")
+    conn.close()
+    points: list[HistoryPoint] = []
+    for i, (d, _c) in enumerate(closes):
+        rv = None
+        if i >= 10:  # enough closes for a trailing estimate
+            w = [c2 for (_dt, c2) in closes[max(0, i - window + 1): i + 1]]
+            rvv = realized_vol(w)
+            rv = round(rvv, 4) if rvv == rvv else None
+        iv = round(ivs[d], 4) if d in ivs else None
+        points.append(HistoryPoint(date=d, iv=iv, rv=rv))
+    iv_vals = [p.iv for p in points if p.iv is not None]
+    rank = iv_rank(iv_vals, iv_vals[-1]) if iv_vals else None
+    prov = f"COTAHIST EOD {asof}" if asof else "COTAHIST EOD"
+    return HistoryResponse(ticker=ticker, points=points, iv_rank=rank, provenance=prov, asof=asof)
 
 
 @app.get("/portfolio/stress", response_model=StressResponse)

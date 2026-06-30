@@ -122,6 +122,25 @@ def iv_history(conn: sqlite3.Connection, ticker: str, *, limit: int = 252) -> li
     return [r["atm_iv"] for r in reversed(rows)]
 
 
+def iv_series(conn: sqlite3.Connection, ticker: str, *, limit: int = 400) -> list[tuple]:
+    """Oldest-first (date, atm_iv) series for charting IV history."""
+    rows = conn.execute(
+        "SELECT date, atm_iv FROM iv_daily WHERE ticker = ? AND atm_iv IS NOT NULL "
+        "ORDER BY date DESC LIMIT ?",
+        (ticker, limit),
+    ).fetchall()
+    return [(r["date"], r["atm_iv"]) for r in reversed(rows)]
+
+
+def close_series(conn: sqlite3.Connection, ticker: str, *, limit: int = 400) -> list[tuple]:
+    """Oldest-first (date, close) series for rolling realized vol."""
+    rows = conn.execute(
+        "SELECT date, close FROM prices_daily WHERE ticker = ? ORDER BY date DESC LIMIT ?",
+        (ticker, limit),
+    ).fetchall()
+    return [(r["date"], r["close"]) for r in reversed(rows)]
+
+
 def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
     conn.execute("INSERT OR REPLACE INTO meta (k,v) VALUES (?,?)", (key, value))
 

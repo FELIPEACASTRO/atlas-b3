@@ -141,6 +141,33 @@ def test_positions_crud_and_portfolio_risk(tmp_path, monkeypatch):
     assert client.get("/portfolio").json()["n_positions"] == 1
 
 
+def test_history_iv_vs_rv_series(tmp_path, monkeypatch):
+    import datetime as dt
+
+    from atlas_api.data import store
+
+    db = str(tmp_path / "hist.db")
+    conn = store.connect(db)
+    base = dt.date(2026, 1, 1)
+    prices, ivs = [], []
+    for i in range(30):  # 30 sessions -> rolling RV and IV Rank both available
+        d = (base + dt.timedelta(days=i)).isoformat()
+        prices.append(("PETR4", d, 38.0, 38.6, 37.4, 38.0 + 0.15 * (i % 5 - 2)))
+        ivs.append(("PETR4", d, 0.28 + 0.002 * i))
+    store.upsert_prices(conn, prices)
+    store.upsert_iv_daily(conn, ivs)
+    store.insert_instruments(conn, [("PETR4", "acao", 38.0, None, 1e9, 0.30, None, 56.6, "2026-01-30")])
+    store.set_meta(conn, "asof", "2026-01-30")
+    conn.commit()
+    conn.close()
+    monkeypatch.setenv("ATLAS_DB", db)
+    d = client.get("/history/PETR4").json()
+    assert len(d["points"]) == 30
+    assert any(p["iv"] is not None for p in d["points"])
+    assert any(p["rv"] is not None for p in d["points"])  # trailing RV after >=10 closes
+    assert d["iv_rank"] is not None  # 30 >= MIN_IV_HISTORY
+
+
 def test_portfolio_stress_delta_gamma(tmp_path, monkeypatch):
     db = str(tmp_path / "st.db")
     _seed_real_store(db)

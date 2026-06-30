@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { VolHistory } from "@/components/vol-history";
+
 type Row = {
   ticker: string;
   kind: string;
@@ -90,6 +92,8 @@ export function OptionsChain() {
           ))}
         </div>
       </div>
+
+      <VolHistory ticker={ticker} />
 
       {loading ? (
         <p className="text-[13px] text-[var(--text-tertiary)]">carregando cadeia…</p>

@@ -106,3 +106,17 @@ class StressResponse(BaseModel):
     theta_per_day: float  # daily decay carried by the book
     provenance: str
     asof: datetime | None = None
+
+
+class HistoryPoint(BaseModel):
+    date: str
+    iv: float | None = None   # ATM implied vol that session
+    rv: float | None = None   # trailing realized vol (close-to-close)
+
+
+class HistoryResponse(BaseModel):
+    ticker: str
+    points: list[HistoryPoint]
+    iv_rank: float | None = None  # where the latest IV sits in the shown window
+    provenance: str
+    asof: str | None = None
