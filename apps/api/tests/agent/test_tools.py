@@ -37,11 +37,12 @@ def test_analyze_option_two_sided_and_breakeven(conn):
     assert tools.analyze_option(conn, ticker="NADA99")["error"]
 
 
-def test_vol_history_window(conn):
+def test_vol_history_uses_canonical_iv_rank(conn):
     v = tools.vol_history(conn, ticker="PETR4")
     assert v["n_sessoes"] == 15
     assert v["iv_atual"] >= v["iv_min"] and v["iv_atual"] <= v["iv_max"]
-    assert v["iv_rank_janela"] is not None      # latest IV is the max -> ~100
+    # canonical iv_rank refuses below 20 sessions (15 seeded) -> honest None, not a noisy rank
+    assert v["iv_rank_janela"] is None
 
 
 def test_market_summary_counts_signals(conn):

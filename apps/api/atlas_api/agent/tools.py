@@ -21,6 +21,7 @@ from atlas_api.analyst.option_analysis import analyze_option as _analyze_option
 from atlas_api.data import store
 from atlas_api.pricing.risk import SPOT_SHOCKS, payoff_at_expiry, payoff_grid, stress_pnl
 from atlas_api.pricing.rv import realized_vol
+from atlas_api.pricing.signal import iv_rank as _iv_rank
 
 _UNDERLYING_TIPOS = ("acao", "indice")
 
@@ -45,9 +46,11 @@ def _dte(venc: str | None, asof: str | None) -> int | None:
 
 
 def _moneyness(kind: str, spot: float | None, strike: float | None) -> str:
-    if not spot or spot <= 0 or strike is None:
+    # same ATM band as analyst.option_analysis (2% of strike) so the chain filter
+    # and the per-option panel never classify the same series differently.
+    if not spot or spot <= 0 or not strike or strike <= 0:
         return "?"
-    if abs(spot - strike) <= 0.02 * spot:
+    if abs(spot / strike - 1.0) <= 0.02:
         return "ATM"
     if kind == "call":
         return "ITM" if spot > strike else "OTM"
@@ -217,7 +220,7 @@ def analyze_option(conn, *, ticker: str) -> dict:
     }
 
 
-def vol_history(conn, *, ticker: str, window: int = 21) -> dict:
+def vol_history(conn, *, ticker: str) -> dict:
     """Where current IV sits vs its own history, and IV vs realized vol (VRP)."""
     ticker = (ticker or "").upper().strip()
     series = store.iv_series(conn, ticker)
@@ -226,7 +229,8 @@ def vol_history(conn, *, ticker: str, window: int = 21) -> dict:
     ivs = [v for (_d, v) in series]
     latest_iv = ivs[-1]
     lo, hi = min(ivs), max(ivs)
-    rank = round((latest_iv - lo) / (hi - lo) * 100, 1) if hi > lo else None
+    # canonical IV Rank: None below MIN_IV_HISTORY (=20) sessions, same rule as the screens
+    rank = _r(_iv_rank(ivs, latest_iv), 1)
     rv = _trailing_rv(conn, ticker)
     return {
         "asof": store.get_meta(conn, "asof"), "ticker": ticker,
@@ -675,7 +679,6 @@ TOOL_SCHEMAS: list[dict] = [
             "type": "object",
             "properties": {
                 "ticker": {"type": "string", "description": "subjacente, ex: PETR4"},
-                "window": {"type": "integer", "description": "janela da RV em sessões (padrão 21)"},
             },
             "required": ["ticker"],
         },
@@ -772,6 +775,6 @@ def dispatch(conn, name: str, args: dict | None) -> dict:
     try:
         return fn(conn, **(args or {}))
     except TypeError as e:
-        return {"error": f"argumentos inválidos para {name}: {e}"}
+        return {"error": f"argumentos inválidos para {name}: {str(e)[:200]}"}
     except Exception as e:  # store/quant failure — report, don't crash the chat
-        return {"error": f"falha ao executar {name}: {e}"}
+        return {"error": f"falha ao executar {name}: {str(e)[:200]}"}

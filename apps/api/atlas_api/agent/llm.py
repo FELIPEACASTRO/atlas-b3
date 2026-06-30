@@ -239,10 +239,12 @@ def _run_openrouter(question, history, *, conn) -> tuple[str, list[dict]]:
     for model in models:
         try:
             return _run_openai(model, key, question, history, conn=conn)
-        except _ProviderError as e:  # free pool busy / model offline -> next model
+        except _ProviderError as e:
             last = e
-            continue
-    raise ChatUnavailable(f"todos os modelos gratuitos do OpenRouter falharam ({last})")
+            if e.code in (401, 403):  # bad/again key — every model fails the same; bail now
+                break
+            continue  # free pool busy / model offline -> try the next model
+    raise ChatUnavailable(f"OpenRouter gratuito indisponível ({last})")
 
 
 # --- Gemini (Google Generative Language, free tier) ------------------------
