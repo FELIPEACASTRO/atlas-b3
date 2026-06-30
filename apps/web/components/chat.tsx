@@ -33,7 +33,7 @@ type Msg = {
   streaming?: boolean;
 };
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
 const SUGGESTIONS = [
   "Como está a volatilidade da PETR4?",
@@ -76,30 +76,6 @@ export function Chat() {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [msgs, busy]);
 
-  // update the assistant message at index `idx` from a streamed SSE event
-  function applyEvent(idx: number, ev: Record<string, unknown>) {
-    setMsgs((cur) => {
-      const copy = cur.slice();
-      const a = { ...copy[idx] };
-      if (ev.type === "delta") {
-        a.content += ev.text as string;
-      } else if (ev.type === "tool") {
-        a.tool_calls = [...(a.tool_calls ?? []), { name: ev.name as string, args: (ev.args ?? {}) as Record<string, unknown> }];
-      } else if (ev.type === "error") {
-        a.content += `${a.content ? "\n" : ""}⚠ ${ev.message as string}`;
-      } else if (ev.type === "done") {
-        a.mode = ev.mode as string;
-        if (Array.isArray(ev.tool_calls)) a.tool_calls = ev.tool_calls as ToolCall[];
-        a.provenance = ev.provenance as string;
-        a.asof = (ev.asof as string) ?? null;
-        a.note = (ev.note as string) ?? null;
-        a.streaming = false;
-      }
-      copy[idx] = a;
-      return copy;
-    });
-  }
-
   async function send(text: string) {
     const q = text.trim();
     if (!q || busy) return;
@@ -115,40 +91,42 @@ export function Chat() {
     setInput("");
     setBusy(true);
     try {
-      const r = await fetch(`${API}/chat/stream`, {
+      // Non-streaming POST /chat: one complete response. This is reliable through
+      // a reverse proxy/tunnel — SSE (/chat/stream) gets reset by the Next proxy
+      // (socket hang up / ECONNRESET) when served behind a tunnel.
+      const r = await fetch(`${API}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: q, history }),
       });
-      if (!r.ok || !r.body) {
+      if (!r.ok) {
         throw new Error(r.status === 503
           ? "Ainda não há dados de mercado carregados no terminal — rode a ingestão para começar."
           : `Não consegui consultar o ATLAS agora (erro ${r.status}). Tente novamente em instantes.`);
       }
-      const reader = r.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const parts = buf.split("\n\n");
-        buf = parts.pop() ?? "";
-        for (const part of parts) {
-          const line = part.split("\n").find((l) => l.startsWith("data: "));
-          if (!line) continue;
-          try {
-            applyEvent(idx, JSON.parse(line.slice(6)));
-          } catch {
-            /* ignore a partial/garbled frame */
-          }
-        }
-      }
+      const data = await r.json();
+      setMsgs((cur) => {
+        const copy = cur.slice();
+        copy[idx] = {
+          ...copy[idx],
+          content: (data.answer as string) ?? "",
+          mode: data.mode as string,
+          tool_calls: (data.tool_calls ?? []) as ToolCall[],
+          provenance: data.provenance as string,
+          asof: (data.asof as string) ?? null,
+          note: (data.note as string) ?? null,
+          streaming: false,
+        };
+        return copy;
+      });
     } catch (e) {
       const msg = e instanceof Error ? e.message : "falha na conexão com o ATLAS";
       setErr(msg);
-      applyEvent(idx, { type: "done", mode: "limitado" });
-      applyEvent(idx, { type: "error", message: msg });
+      setMsgs((cur) => {
+        const copy = cur.slice();
+        copy[idx] = { ...copy[idx], content: `⚠ ${msg}`, mode: "limitado", streaming: false };
+        return copy;
+      });
     } finally {
       setBusy(false);
     }

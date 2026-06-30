@@ -14,7 +14,7 @@ type Summary = {
   bova11: number | null;
 };
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
 function fmtVol(n: number): string {
   if (n >= 1e9) return `R$ ${(n / 1e9).toFixed(1)} bi`;
@@ -29,7 +29,10 @@ export function MetricCards() {
   useEffect(() => {
     let alive = true;
     fetch(`${API}/summary`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(String(r.status));
+        return r.json();
+      })
       .then((d: Summary) => alive && setS(d))
       .catch(() => alive && setOffline(true));
     return () => {

@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 type Pt = { shock_pct: number; pnl_now: number; pnl_expiry: number };
 type Payoff = { points: Pt[]; provenance: string };
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 const brl0 = (n: number) =>
   (n >= 0 ? "+" : "") + n.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 

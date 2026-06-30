@@ -31,7 +31,7 @@ type Stress = {
   theta_per_day: number;
 };
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
 const fmt = (n: number | null, d = 2): string => (n == null ? "—" : n.toFixed(d));
 const brl = (n: number | null): string =>

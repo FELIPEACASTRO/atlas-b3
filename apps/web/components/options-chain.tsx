@@ -21,7 +21,7 @@ type Row = {
   asof: string;
 };
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
 function fmt(n: number | null, d = 2): string {
   return n == null ? "—" : n.toFixed(d);

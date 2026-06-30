@@ -21,13 +21,7 @@ type Row = {
   asof: string;
 };
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
-const FALLBACK: Row[] = [
-  { ticker: "PETR4", tipo: "acao", ultimo: 38.42, var_pct: 1.2, liquidez: 1.2e9, iv: null, iv_vs_rv: null, iv_rank: null, vrp: null, pc_ratio: null, skew: null, provenance: "fixture", asof: "" },
-  { ticker: "PETRG38", tipo: "call", ultimo: 1.15, var_pct: 4.5, liquidez: 88e6, iv: 0.42, iv_vs_rv: "rico", iv_rank: null, vrp: null, pc_ratio: null, skew: null, provenance: "fixture", asof: "" },
-  { ticker: "VALE3", tipo: "acao", ultimo: 61.3, var_pct: -0.8, liquidez: 9.8e8, iv: null, iv_vs_rv: null, iv_rank: null, vrp: null, pc_ratio: null, skew: null, provenance: "fixture", asof: "" },
-];
+const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
 function fmtLiq(n: number): string {
   if (n >= 1e9) return `R$ ${(n / 1e9).toFixed(1)} bi`;
@@ -57,21 +51,30 @@ function SigBadge({ sig }: { sig: string | null }) {
 
 export function ScreenerTable() {
   const router = useRouter();
-  const [rows, setRows] = useState<Row[]>(FALLBACK);
-  const [provenance, setProvenance] = useState<string>("fixture (API offline)");
+  const [rows, setRows] = useState<Row[]>([]);
+  const [provenance, setProvenance] = useState<string>("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [query, setQuery] = useState("");
 
   useEffect(() => {
     let alive = true;
     fetch(`${API}/screener`)
-      .then((r) => r.json())
-      .then((data: Row[]) => {
-        if (alive && Array.isArray(data) && data.length) {
-          setRows(data);
-          setProvenance(data[0].provenance);
-        }
+      .then((r) => {
+        if (!r.ok) throw new Error(String(r.status));
+        return r.json();
       })
-      .catch(() => {});
+      .then((data: Row[]) => {
+        if (!alive) return;
+        setRows(Array.isArray(data) ? data : []);
+        setProvenance(Array.isArray(data) && data.length ? data[0].provenance : "");
+        setLoading(false);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setError(true);
+        setLoading(false);
+      });
     return () => {
       alive = false;
     };
@@ -90,78 +93,84 @@ export function ScreenerTable() {
         className="mb-3 w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2 text-[13px] outline-none"
         style={{ color: "var(--text-primary)" }}
       />
-      {provenance.toLowerCase().startsWith("fixture") ? (
-        <div className="mb-3 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px]"
-          style={{ background: "color-mix(in oklch, var(--accent) 14%, transparent)", color: "var(--accent)" }}>
-          mostrando exemplo — API offline (não é o mercado real)
-        </div>
-      ) : null}
-      <div className="overflow-x-auto rounded-xl border border-[var(--border-subtle)]">
-        <table className="w-full min-w-[760px] text-[13px]">
-          <thead>
-            <tr className="bg-[var(--bg-surface)] text-left text-[var(--text-secondary)]">
-              <th className="px-4 py-2.5 font-normal">Ativo</th>
-              <th className="px-3 py-2.5 font-normal">Tipo</th>
-              <th className="px-3 py-2.5 text-right font-normal">Último</th>
-              <th className="px-3 py-2.5 text-right font-normal">Var %</th>
-              <th className="px-3 py-2.5 text-right font-normal">Liquidez</th>
-              <th className="px-3 py-2.5 text-right font-normal">IV</th>
-              <th className="px-3 py-2.5 text-right font-normal">
-                <span className="inline-flex items-center gap-1">IV Rank
-                  <InfoTip text="Onde a IV de hoje está na faixa mín–máx da janela (~1 ano). 0 = mínimo, 100 = máximo. Alto = volatilidade cara vs a própria história do ativo." />
-                </span>
-              </th>
-              <th className="px-3 py-2.5 text-right font-normal">
-                <span className="inline-flex items-center gap-1">VRP
-                  <InfoTip text="Prêmio de variância = IV − RV, em pontos de vol. Positivo = implícita acima da realizada (você é pago por vender volatilidade)." />
-                </span>
-              </th>
-              <th className="px-4 py-2.5 text-right font-normal">
-                <span className="inline-flex items-center gap-1">IV vs RV
-                  <InfoTip text="Heurística (não recomendação): IV implícita vs RV realizada. Rico = IV > RV; Barato = IV < RV." />
-                </span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((r) => (
-              <tr
-                key={r.ticker}
-                onClick={() => router.push(`/opcoes?t=${r.ticker}`)}
-                className="atlas-row cursor-pointer border-t border-[var(--border-subtle)]"
-                title={`Abrir cadeia de ${r.ticker}`}
-              >
-                <td className="mono px-4 py-2.5 font-medium" style={{ color: "var(--accent)" }}>{r.ticker}</td>
-                <td className="px-3 py-2.5 text-[var(--text-secondary)]">{tipoLabel(r.tipo)}</td>
-                <td className="mono px-3 py-2.5 text-right">
-                  {r.ultimo != null ? r.ultimo.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—"}
-                </td>
-                <td className="mono px-3 py-2.5 text-right" style={{ color: r.var_pct == null ? undefined : r.var_pct >= 0 ? "var(--up)" : "var(--down)" }}>
-                  {r.var_pct != null ? `${r.var_pct >= 0 ? "+" : ""}${r.var_pct.toFixed(1)}%` : "—"}
-                </td>
-                <td className="mono px-3 py-2.5 text-right">{r.liquidez != null ? fmtLiq(r.liquidez) : "—"}</td>
-                <td className="mono px-3 py-2.5 text-right">{r.iv != null ? `${(r.iv * 100).toFixed(0)}%` : "—"}</td>
-                <td className="mono px-3 py-2.5 text-right">{r.iv_rank != null ? r.iv_rank.toFixed(0) : "—"}</td>
-                <td className="mono px-3 py-2.5 text-right" style={{ color: r.vrp == null ? undefined : r.vrp >= 0 ? "var(--accent)" : "var(--up)" }}>
-                  {r.vrp != null ? `${r.vrp >= 0 ? "+" : ""}${(r.vrp * 100).toFixed(1)}` : "—"}
-                </td>
-                <td className="px-4 py-2.5 text-right">
-                  <SigBadge sig={r.iv_vs_rv} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="mt-3 flex items-center gap-4 text-[11.5px] text-[var(--text-tertiary)]">
-        <span className="flex items-center gap-1.5">
-          <i className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "var(--accent)" }} /> Rico = IV &gt; RV
-        </span>
-        <span className="flex items-center gap-1.5">
-          <i className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "var(--up)" }} /> Barato = IV &lt; RV
-        </span>
-        <span>fonte: {provenance} · heurística, não recomendação</span>
-      </div>
+      {loading ? (
+        <p className="text-[13px] text-[var(--text-tertiary)]">carregando o mercado…</p>
+      ) : error ? (
+        <p className="text-[13px] text-[var(--text-secondary)]">
+          Sem dado de mercado — confira se o backend está no ar e se a ingestão foi rodada (cli update).
+        </p>
+      ) : rows.length === 0 ? (
+        <p className="text-[13px] text-[var(--text-secondary)]">Nenhum ativo na base no momento.</p>
+      ) : (
+        <>
+          <div className="overflow-x-auto rounded-xl border border-[var(--border-subtle)]">
+            <table className="w-full min-w-[760px] text-[13px]">
+              <thead>
+                <tr className="bg-[var(--bg-surface)] text-left text-[var(--text-secondary)]">
+                  <th className="px-4 py-2.5 font-normal">Ativo</th>
+                  <th className="px-3 py-2.5 font-normal">Tipo</th>
+                  <th className="px-3 py-2.5 text-right font-normal">Último</th>
+                  <th className="px-3 py-2.5 text-right font-normal">Var %</th>
+                  <th className="px-3 py-2.5 text-right font-normal">Liquidez</th>
+                  <th className="px-3 py-2.5 text-right font-normal">IV</th>
+                  <th className="px-3 py-2.5 text-right font-normal">
+                    <span className="inline-flex items-center gap-1">IV Rank
+                      <InfoTip text="Onde a IV de hoje está na faixa mín–máx da janela (~1 ano). 0 = mínimo, 100 = máximo. Alto = volatilidade cara vs a própria história do ativo." />
+                    </span>
+                  </th>
+                  <th className="px-3 py-2.5 text-right font-normal">
+                    <span className="inline-flex items-center gap-1">VRP
+                      <InfoTip text="Prêmio de variância = IV − RV, em pontos de vol. Positivo = implícita acima da realizada (você é pago por vender volatilidade)." />
+                    </span>
+                  </th>
+                  <th className="px-4 py-2.5 text-right font-normal">
+                    <span className="inline-flex items-center gap-1">IV vs RV
+                      <InfoTip text="Heurística (não recomendação): IV implícita vs RV realizada. Rico = IV > RV; Barato = IV < RV." />
+                    </span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((r) => (
+                  <tr
+                    key={r.ticker}
+                    onClick={() => router.push(`/opcoes?t=${r.ticker}`)}
+                    className="atlas-row cursor-pointer border-t border-[var(--border-subtle)]"
+                    title={`Abrir cadeia de ${r.ticker}`}
+                  >
+                    <td className="mono px-4 py-2.5 font-medium" style={{ color: "var(--accent)" }}>{r.ticker}</td>
+                    <td className="px-3 py-2.5 text-[var(--text-secondary)]">{tipoLabel(r.tipo)}</td>
+                    <td className="mono px-3 py-2.5 text-right">
+                      {r.ultimo != null ? r.ultimo.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—"}
+                    </td>
+                    <td className="mono px-3 py-2.5 text-right" style={{ color: r.var_pct == null ? undefined : r.var_pct >= 0 ? "var(--up)" : "var(--down)" }}>
+                      {r.var_pct != null ? `${r.var_pct >= 0 ? "+" : ""}${r.var_pct.toFixed(1)}%` : "—"}
+                    </td>
+                    <td className="mono px-3 py-2.5 text-right">{r.liquidez != null ? fmtLiq(r.liquidez) : "—"}</td>
+                    <td className="mono px-3 py-2.5 text-right">{r.iv != null ? `${(r.iv * 100).toFixed(0)}%` : "—"}</td>
+                    <td className="mono px-3 py-2.5 text-right">{r.iv_rank != null ? r.iv_rank.toFixed(0) : "—"}</td>
+                    <td className="mono px-3 py-2.5 text-right" style={{ color: r.vrp == null ? undefined : r.vrp >= 0 ? "var(--accent)" : "var(--up)" }}>
+                      {r.vrp != null ? `${r.vrp >= 0 ? "+" : ""}${(r.vrp * 100).toFixed(1)}` : "—"}
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      <SigBadge sig={r.iv_vs_rv} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-3 flex items-center gap-4 text-[11.5px] text-[var(--text-tertiary)]">
+            <span className="flex items-center gap-1.5">
+              <i className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "var(--accent)" }} /> Rico = IV &gt; RV
+            </span>
+            <span className="flex items-center gap-1.5">
+              <i className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "var(--up)" }} /> Barato = IV &lt; RV
+            </span>
+            <span>fonte: {provenance || "—"} · heurística, não recomendação</span>
+          </div>
+        </>
+      )}
     </div>
   );
 }
