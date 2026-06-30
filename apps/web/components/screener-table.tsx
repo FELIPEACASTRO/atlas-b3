@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { InfoTip } from "@/components/info-tip";
+
 type Row = {
   ticker: string;
   tipo: string;
@@ -98,9 +100,21 @@ export function ScreenerTable() {
               <th className="px-3 py-2.5 text-right font-normal">Var %</th>
               <th className="px-3 py-2.5 text-right font-normal">Liquidez</th>
               <th className="px-3 py-2.5 text-right font-normal">IV</th>
-              <th className="px-3 py-2.5 text-right font-normal">IV Rank</th>
-              <th className="px-3 py-2.5 text-right font-normal" title="prêmio de variância: IV − RV em pontos de vol">VRP</th>
-              <th className="px-4 py-2.5 text-right font-normal">IV vs RV</th>
+              <th className="px-3 py-2.5 text-right font-normal">
+                <span className="inline-flex items-center gap-1">IV Rank
+                  <InfoTip text="Onde a IV de hoje está na faixa mín–máx da janela (~1 ano). 0 = mínimo, 100 = máximo. Alto = volatilidade cara vs a própria história do ativo." />
+                </span>
+              </th>
+              <th className="px-3 py-2.5 text-right font-normal">
+                <span className="inline-flex items-center gap-1">VRP
+                  <InfoTip text="Prêmio de variância = IV − RV, em pontos de vol. Positivo = implícita acima da realizada (você é pago por vender volatilidade)." />
+                </span>
+              </th>
+              <th className="px-4 py-2.5 text-right font-normal">
+                <span className="inline-flex items-center gap-1">IV vs RV
+                  <InfoTip text="Heurística (não recomendação): IV implícita vs RV realizada. Rico = IV > RV; Barato = IV < RV." />
+                </span>
+              </th>
             </tr>
           </thead>
           <tbody>
