@@ -36,6 +36,18 @@ def _seed(db: str) -> None:
     conn.close()
 
 
+@pytest.fixture(autouse=True)
+def _no_live_llm(monkeypatch):
+    """Hermetic: no provider keys, keys-file pointed at nowhere -> modo simples.
+
+    Tests that want a provider set their own env/monkeypatch after this runs.
+    """
+    monkeypatch.setenv("ATLAS_KEYS_FILE", "atlas_keys_does_not_exist.tmp")
+    for k in ("OPENROUTER_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY",
+              "ANTHROPIC_API_KEY", "ATLAS_CHAT_PROVIDER", "ATLAS_OPENROUTER_MODELS"):
+        monkeypatch.delenv(k, raising=False)
+
+
 @pytest.fixture
 def seeded_db(tmp_path) -> str:
     db = str(tmp_path / "atlas.db")

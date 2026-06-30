@@ -21,9 +21,9 @@ dois lados (a decisão é sempre sua).
 - **Chat** — pergunte em linguagem natural sobre qualquer ação/opção. O assistente é
   **ancorado nos dados reais via ferramentas** (screener, retrato do ativo, busca de
   opções, painel por opção, histórico de vol): o modelo só narra; os números vêm sempre
-  do motor determinístico — ele não inventa preço/IV/grego. Funciona em **modo simples**
-  (sem chave, responde padrões comuns) e em **modo IA ao vivo** (com `ANTHROPIC_API_KEY`,
-  entende perguntas livres). Análise, não recomendação.
+  do motor determinístico — ele não inventa preço/IV/grego. Usa **modelos gratuitos**
+  (OpenRouter `:free` → Gemini free tier, com failover) e degrada para o **modo simples**
+  (determinístico, sem rede) se todos estiverem ocupados. Análise, não recomendação.
 
 ## Stack
 
@@ -49,20 +49,34 @@ npm --prefix apps/web run dev      # abra http://localhost:3000
 
 Testes: `PYTHONPATH=apps/api apps/api/.venv/Scripts/python.exe -m pytest apps/api/tests -q`
 
-### Chat (modo IA ao vivo, opcional)
+### Chat — provedores gratuitos
 
-O Chat funciona sem chave (modo simples). Para perguntas livres, ligue o provedor de
-IA — o LLM só orquestra as ferramentas; a honestidade é preservada porque todo número
-volta do mesmo store EOD:
+O Chat tenta provedores **gratuitos** primeiro e degrada para o modo simples se todos
+estiverem ocupados — sempre ancorado nos mesmos dados (o LLM só orquestra as ferramentas;
+todo número volta do store EOD). OpenRouter e Gemini usam **só a stdlib** (sem instalar
+nada):
+
+1. **OpenRouter** — modelos `:free` (Llama 3.3 70B, Qwen3, …), com failover entre vários.
+2. **Gemini** — `gemini-2.5-flash` (free tier do Google), fallback confiável.
+
+As chaves vêm de variáveis de ambiente **ou** de um arquivo local gitignored
+(`CHAVE.txt` por padrão; `ATLAS_KEYS_FILE` aponta para outro):
 
 ```bash
-apps/api/.venv/Scripts/python.exe -m pip install anthropic   # provedor padrão
-export ANTHROPIC_API_KEY=sk-ant-...                          # sua chave
-# opcional: export ATLAS_CHAT_MODEL=claude-opus-4-8 (padrão)
+export OPENROUTER_API_KEY=sk-or-...     # opcional
+export GEMINI_API_KEY=AIza...           # opcional (free tier estável)
+# ou: rode com ATLAS_KEYS_FILE=CHAVE.txt e deixe as chaves no arquivo (NUNCA versionado)
 ```
 
-Sem `ANTHROPIC_API_KEY` (ou sem o pacote `anthropic`), o `/chat` responde no modo
-simples — útil de imediato, e claro sobre o limite.
+Sem nenhuma chave, o `/chat` responde no **modo simples** — determinístico, grátis, sem
+rede, e claro sobre o limite.
+
+Tuning: `ATLAS_CHAT_PROVIDER` (`auto`=só gratuitos | `openrouter` | `gemini` | `anthropic`),
+`ATLAS_OPENROUTER_MODELS` (lista CSV de modelos), `ATLAS_GEMINI_MODEL`. O provedor pago
+`anthropic` (precisa `pip install anthropic` + `ANTHROPIC_API_KEY`) só roda se forçado.
+
+> Os modelos `:free` do OpenRouter são best-effort (rate-limit upstream) — por isso o
+> failover entre vários e para o Gemini.
 
 ## Dados (o `data_cache/atlas.db` é gitignored — regenere)
 
