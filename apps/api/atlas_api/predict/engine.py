@@ -5,6 +5,7 @@ Tudo sobre o dado real; nada fabricado — quando falta histórico, devolve flag
 """
 from __future__ import annotations
 
+import datetime
 import math
 
 import numpy as np
@@ -18,6 +19,7 @@ from .distribution import Density, physical_density
 from .forecast import har_leverage, vol_ensemble
 from .regime import regime, strategy_bias
 from .series import neg_return_series, rv_series
+from .ssvi import fit_market_smile
 from .validate import pit_uniformity
 
 _RECAL_WINDOW = 60     # janela da recalibração isotônica online (medido: rolante conserta, estático piora)
@@ -52,6 +54,48 @@ def _term_and_skew(chain: list[dict], spot: float):
         ]
         skew = skew_25d(put_deltas, atm_iv)
     return term_slope, skew
+
+
+def _market_smile(chain: list[dict], spot: float, asof: str | None, target_days: int) -> dict | None:
+    """Densidade de MERCADO via SVI no vencimento líquido mais próximo de ``target_days``.
+
+    Só devolve quando o fit é confiável (``usable``: arb-free + RMSE baixo) — senão None
+    (BBAS3, p.ex., é recusado honestamente). Substitui o proxy IV-ATM no painel mercado-vs-físico.
+    """
+    if not chain or not asof or spot is None or spot <= 0:
+        return None
+    try:
+        a = datetime.date.fromisoformat(asof)
+    except (ValueError, TypeError):
+        return None
+    by_venc: dict[str, list[dict]] = {}
+    for o in chain:
+        if o.get("venc") and o.get("iv") is not None and o.get("strike") is not None:
+            by_venc.setdefault(o["venc"], []).append(o)
+    dated: list[tuple[int, list[dict]]] = []
+    for venc, opts in by_venc.items():
+        try:
+            dte = (datetime.date.fromisoformat(venc) - a).days
+        except ValueError:
+            continue
+        if dte > 0:
+            dated.append((dte, opts))
+    # prefere vencimentos RICOS (mensais da 3ª sexta, smile bem-determinada); só cai p/ finos se preciso
+    rich = [(dte, opts) for dte, opts in dated if len(opts) >= 20]
+    pool = rich if rich else [(dte, opts) for dte, opts in dated if len(opts) >= 6]
+    if not pool:
+        return None
+    dte, opts = min(pool, key=lambda do: abs(do[0] - target_days))
+    out = fit_market_smile([o["strike"] for o in opts], [o["iv"] for o in opts],
+                           spot=spot, T=dte / 365.0)
+    if out is None or not out["usable"]:
+        return None
+    k, p = out["k"], out["density"]
+    std_rn = float(np.sqrt(max(np.trapezoid(k * k * p, k), 0.0)) / np.sqrt(dte / 365.0))
+    return {
+        "atm_vol": round(out["atm_vol"], 4), "std_rn": round(std_rn, 4),
+        "dte": dte, "rmse": out["rmse"], "n_strikes": out["n_strikes"], "source": "SVI",
+    }
 
 
 def _recal_pop(dens: Density, target: float, side: str, recal: IsotonicRecalibrator | None) -> float:
@@ -167,6 +211,8 @@ def build_prediction(
     term_slope, skew = _term_and_skew(chain, spot)
     reg = strategy_bias(regime(ivr, vrp, term_slope, skew))
 
+    smile = _market_smile(chain, spot, asof, T_days)            # densidade de mercado (SVI), se confiável
+
     return {
         **base_out,
         "sigma": round(sigma, 4),
@@ -174,6 +220,7 @@ def build_prediction(
             "iv": round(sigma_iv, 4) if sigma_iv is not None else None,
             "physical": round(dens.sigma, 4),
             "vrp": round(vrp, 4),
+            "market_smile": smile,          # ATM/densidade RN da SVI (None se a smile não é confiável)
         },
         "dist": dist,
         "regime": {**reg, "iv_rank": round(ivr, 1) if ivr is not None else None,
