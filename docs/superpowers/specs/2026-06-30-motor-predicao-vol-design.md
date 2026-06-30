@@ -39,6 +39,7 @@ ruído; edge direcional derrete após spread/liquidez da B3. O edge defensável 
 
 Convergência dos 6 agentes (resumo das fontes na §9):
 - **HAR é o teto quase-imbatível** em vol diária; "se não bate HAR OOS, é bug ou história, não modelo".
+- **MEDIDO na execução (ML-1 Task 4):** o ganho do **leverage só é detectável pelo gate com um proxy de RV LIMPO**. Sob `r²` diário (ruidoso) o edge fica abaixo do limiar (DM-significativo em 3/8 seeds sintéticas); com RV intradiário-agregado (= o que o Yang-Zhang entrega) é robusto (MSE 8/8, QLIKE 7/8). **Por isso o adapter prefere Yang-Zhang — detectabilidade, não só eficiência.** Em EOD puro, é plausível que HAR-Lev não bata HAR em alguns nomes: HAR puro fica de baseline, ensemble como hedge. Resultado negativo é resultado.
 - **DL/foundation models são miragem em EOD:** TimesFM-500M dá R² OOS **−2,8%** vs CatBoost; look-ahead bias; ~50k GPU-h só p/ empatar (arXiv 2511.18578). LSTM/TFT/N-BEATS empatam com uma reta (DLinear, Zeng 2022).
 - **VRP positivo e significativo na B3** (IVol-BR/SciELO) — paradoxo: a iliquidez que dificulta a execução é a que mantém o prêmio vivo. **Medir no dado B3, nunca importar magnitude dos EUA** (lá virou ~0 desde 2012).
 - **O maior risco não é o modelo — é aceitar um ganho que não sobrevive ao gate.** O harness de validação é o produto.
