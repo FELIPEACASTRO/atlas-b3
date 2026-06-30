@@ -18,6 +18,12 @@ dois lados (a decisão é sempre sua).
 - **Carteira** — posições ações+opções, risco líquido (Δ/Γ/vega/θ), **stress** de
   mercado e **diagrama de payoff** (hoje vs no vencimento).
 - **Analista** — briefing honesto por subjacente (setup, dois lados, 3 perfis de risco).
+- **Chat** — pergunte em linguagem natural sobre qualquer ação/opção. O assistente é
+  **ancorado nos dados reais via ferramentas** (screener, retrato do ativo, busca de
+  opções, painel por opção, histórico de vol): o modelo só narra; os números vêm sempre
+  do motor determinístico — ele não inventa preço/IV/grego. Funciona em **modo simples**
+  (sem chave, responde padrões comuns) e em **modo IA ao vivo** (com `ANTHROPIC_API_KEY`,
+  entende perguntas livres). Análise, não recomendação.
 
 ## Stack
 
@@ -42,6 +48,21 @@ npm --prefix apps/web run dev      # abra http://localhost:3000
 ```
 
 Testes: `PYTHONPATH=apps/api apps/api/.venv/Scripts/python.exe -m pytest apps/api/tests -q`
+
+### Chat (modo IA ao vivo, opcional)
+
+O Chat funciona sem chave (modo simples). Para perguntas livres, ligue o provedor de
+IA — o LLM só orquestra as ferramentas; a honestidade é preservada porque todo número
+volta do mesmo store EOD:
+
+```bash
+apps/api/.venv/Scripts/python.exe -m pip install anthropic   # provedor padrão
+export ANTHROPIC_API_KEY=sk-ant-...                          # sua chave
+# opcional: export ATLAS_CHAT_MODEL=claude-opus-4-8 (padrão)
+```
+
+Sem `ANTHROPIC_API_KEY` (ou sem o pacote `anthropic`), o `/chat` responde no modo
+simples — útil de imediato, e claro sobre o limite.
 
 ## Dados (o `data_cache/atlas.db` é gitignored — regenere)
 

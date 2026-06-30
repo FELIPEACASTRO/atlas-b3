@@ -15,12 +15,16 @@ from datetime import date, datetime, timezone
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from atlas_api.agent import chat as chat_agent
 from atlas_api.analyst.briefing import Setup, build_briefing
 from atlas_api.analyst.option_analysis import OptionCtx, analyze_option
 from atlas_api.data import store
 from atlas_api.models import (
     BriefingResponse,
     ChainRow,
+    ChatRequest,
+    ChatResponse,
+    ChatToolCall,
     HistoryPoint,
     HistoryResponse,
     OptionAnalysisOut,
@@ -529,4 +533,31 @@ def portfolio_payoff() -> PayoffResponse:
         points=pts,
         provenance=f"COTAHIST EOD {asof}" if asof else "sem dado de mercado",
         asof=asof or None,
+    )
+
+
+@app.post("/chat", response_model=ChatResponse)
+def chat(req: ChatRequest) -> ChatResponse:
+    """Natural-language Q&A about options and stocks, grounded in the real store.
+
+    The LLM (or the deterministic fallback) may only report numbers a tool
+    returned from this same EOD store — it cannot invent prices/IV/greeks.
+    Analysis, not recommendation; every reply carries provenance + asof.
+    """
+    conn = _store_conn()
+    if conn is None:
+        raise HTTPException(status_code=503,
+                            detail="sem dado de mercado — defina ATLAS_DB e rode a ingestão")
+    asof = store.get_meta(conn, "asof")
+    try:
+        res = chat_agent.answer(req.question, req.history, conn=conn)
+    finally:
+        conn.close()
+    return ChatResponse(
+        answer=res.answer,
+        mode=res.mode,
+        tool_calls=[ChatToolCall(name=c["name"], args=c.get("args", {})) for c in res.tool_calls],
+        provenance=f"COTAHIST EOD {asof}" if asof else "COTAHIST EOD",
+        asof=asof,
+        note=res.note,
     )

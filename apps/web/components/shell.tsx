@@ -7,6 +7,7 @@ import {
   CandlestickChart,
   Briefcase,
   UserSearch,
+  MessageSquare,
   Search,
 } from "lucide-react";
 
@@ -19,6 +20,7 @@ const modules = [
   { icon: CandlestickChart, label: "Opções", href: "/opcoes" },
   { icon: Briefcase, label: "Carteira", href: "/carteira" },
   { icon: UserSearch, label: "Analista", href: "/analista" },
+  { icon: MessageSquare, label: "Chat", href: "/chat" },
 ];
 
 export function Shell({

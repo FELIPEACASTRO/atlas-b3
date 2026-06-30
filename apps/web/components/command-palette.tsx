@@ -8,6 +8,7 @@ import {
   CandlestickChart,
   Briefcase,
   UserSearch,
+  MessageSquare,
   Search,
   CornerDownLeft,
   TrendingUp,
@@ -27,6 +28,7 @@ const MODULES: Cmd[] = [
   { id: "opcoes", label: "Opções", hint: "cadeia + volatilidade", icon: CandlestickChart, run: (r) => r.push("/opcoes") },
   { id: "carteira", label: "Carteira", hint: "risco e stress consolidados", icon: Briefcase, run: (r) => r.push("/carteira") },
   { id: "analista", label: "Analista", hint: "briefing honesto", icon: UserSearch, run: (r) => r.push("/analista") },
+  { id: "chat", label: "Chat com o ATLAS", hint: "pergunte sobre opções e ações", icon: MessageSquare, run: (r) => r.push("/chat") },
 ];
 
 export function CommandPalette() {
