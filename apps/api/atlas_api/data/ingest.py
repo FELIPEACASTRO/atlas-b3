@@ -16,14 +16,38 @@ from atlas_api.data.calendar_b3 import year_fraction
 from atlas_api.data.cotahist import Quote, parse_file
 from atlas_api.data.option_code import code_consistent
 from atlas_api.pricing.american import american_greeks, american_iv
+from atlas_api.pricing.bs import bs_greeks
 from atlas_api.pricing.features import put_call_ratio, skew_25d, vrp
-from atlas_api.pricing.iv import iv_is_reliable
+from atlas_api.pricing.iv import implied_vol, iv_is_reliable
 from atlas_api.pricing.rv import realized_vol
 from atlas_api.pricing.signal import classify, iv_rank
 
 _SUFFIXES = ("4", "3", "11", "5", "6")
 _DEFAULT_RATE = 0.1165
 _MIN_HISTORY = 3  # closes needed for a realized-vol estimate
+_BD_YEAR = 252  # B3 business days/year (annual theta -> per-day)
+
+
+def _is_index(isin: str | None) -> bool:
+    """An index instrument (e.g. IBOV11) carries an 'IND' ISIN — its options are
+    European/cash-settled, not American."""
+    return bool(isin) and "INDM" in isin
+
+
+def _solve_iv_greeks(kind, price, spot, strike, rate, q, T, *, index: bool):
+    """IV + per-day greeks: European (Bjerksund-free) for index options, American
+    (Bjerksund-Stensland) for equity options. Returns (None, None) when the IV is
+    not economically reliable. Theta is normalized to per-day in both paths."""
+    if index:
+        iv = implied_vol(kind, price, spot, strike, rate, q, T)
+        if not iv_is_reliable(kind, price, spot, strike, iv):
+            return None, None
+        g = bs_greeks(kind, spot, strike, rate, q, T, iv)
+        return iv, {"delta": g["delta"], "gamma": g["gamma"], "vega": g["vega"], "theta": g["theta"] / _BD_YEAR}
+    iv = american_iv(kind, price, spot, strike, rate, q, T)
+    if not iv_is_reliable(kind, price, spot, strike, iv):
+        return None, None
+    return iv, american_greeks(kind, spot, strike, rate, q, T, iv)  # theta already per-day
 
 
 def _guess_underlying(option_ticker: str, stocks: dict[str, Quote]) -> str | None:
@@ -64,6 +88,7 @@ def ingest_cotahist(
         rate = fetch_annual_rate() or _DEFAULT_RATE
     stocks = {qt.ticker: qt for qt in quotes if qt.tipo == "acao"}
     stock_by_isin = {qt.isin: qt.ticker for qt in quotes if qt.tipo == "acao" and qt.isin}
+    index_set = {qt.ticker for qt in stocks.values() if _is_index(qt.isin)}  # e.g. IBOV11
     # real dividend yield per underlying (brapi); COTAHIST has none, so default q=0.
     q_map = q_by_ticker or {}
 
@@ -91,21 +116,20 @@ def ingest_cotahist(
         iv = delta = gamma = vega = theta = None
         # require expiry strictly after the snapshot: at venc <= asof the time value
         # is ~0 and IV/greeks degenerate (gamma explodes, theta -> 0). No decision left.
+        # require expiry strictly after the snapshot (venc <= asof => degenerate greeks).
+        # equity options are American (Bjerksund-Stensland); index options (IBOV) are
+        # European/cash-settled. The economic-reliability gate is applied either way.
         if base and qt.strike and qt.venc and qt.venc > asof:
             T = _years_to_expiry(asof, qt.venc)
             q_u = q_map.get(underlying, q)  # real dividend yield when known, else 0
-            # B3 equity options are AMERICAN: invert the Bjerksund-Stensland price
-            # (validated vs CRR) so the early-exercise premium is not misread as IV.
-            iv_val = american_iv(qt.tipo, qt.preco_ult, base.preco_ult, qt.strike, rate, q_u, T)
-            # economic-validity gate, not just NaN: an at-intrinsic/stale EOD print
-            # can yield an absurd vol (real data: 464%) that reprices with non-trivial
-            # vega and would otherwise slip through. Suppress IV *and* its greeks, and
-            # keep it out of the ATM pick so the underlying signal stays clean.
-            if iv_is_reliable(qt.tipo, qt.preco_ult, base.preco_ult, qt.strike, iv_val):
+            iv_val, g = _solve_iv_greeks(
+                qt.tipo, qt.preco_ult, base.preco_ult, qt.strike, rate, q_u, T,
+                index=underlying in index_set,
+            )
+            if iv_val is not None:
                 iv = round(iv_val, 4)
-                g = american_greeks(qt.tipo, base.preco_ult, qt.strike, rate, q_u, T, iv_val)
                 delta, gamma, vega = round(g["delta"], 4), round(g["gamma"], 6), round(g["vega"], 4)
-                theta = round(g["theta"], 4)  # american_greeks theta is already per-day
+                theta = round(g["theta"], 4)
                 dist = abs(qt.strike - base.preco_ult)
                 if underlying not in atm or dist < atm[underlying][0]:
                     atm[underlying] = (dist, iv_val)
@@ -186,6 +210,7 @@ def ingest_history(
     q_map = q_by_ticker or {}
     stocks = {qt.ticker: qt for qt in quotes if qt.tipo == "acao"}
     stock_by_isin = {qt.isin: qt.ticker for qt in quotes if qt.tipo == "acao" and qt.isin}
+    index_set = {qt.ticker for qt in stocks.values() if _is_index(qt.isin)}
 
     conn = store.connect(db_path)
     store.upsert_prices(
@@ -211,8 +236,11 @@ def ingest_history(
     iv_rows: list[tuple] = []
     for u, (_d, qt, base) in atm_q.items():
         T = _years_to_expiry(asof, qt.venc)
-        iv = american_iv(qt.tipo, qt.preco_ult, base.preco_ult, qt.strike, rate, q_map.get(u, 0.0), T)
-        if iv_is_reliable(qt.tipo, qt.preco_ult, base.preco_ult, qt.strike, iv):
+        iv, _g = _solve_iv_greeks(
+            qt.tipo, qt.preco_ult, base.preco_ult, qt.strike, rate, q_map.get(u, 0.0), T,
+            index=u in index_set,
+        )
+        if iv is not None:
             iv_rows.append((u, asof_s, round(iv, 4)))
     store.upsert_iv_daily(conn, iv_rows)
     conn.commit()
