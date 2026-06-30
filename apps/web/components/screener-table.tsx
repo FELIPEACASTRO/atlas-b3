@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ArrowDown, ArrowUp } from "lucide-react";
 
 import { InfoTip } from "@/components/info-tip";
 
@@ -20,6 +21,8 @@ type Row = {
   provenance: string;
   asof: string;
 };
+
+type SortCol = "ultimo" | "var_pct" | "liquidez" | "iv" | "iv_rank" | "vrp";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
@@ -49,13 +52,46 @@ function SigBadge({ sig }: { sig: string | null }) {
   return <span className="text-[var(--text-tertiary)]">—</span>;
 }
 
-export function ScreenerTable() {
+/** Sortable, right-aligned column header. The sort button and the InfoTip are
+ *  siblings (never nested buttons). */
+function SortTh({
+  label, col, sort, onSort, tip, last,
+}: {
+  label: string;
+  col: SortCol;
+  sort: { col: SortCol | null; dir: 1 | -1 };
+  onSort: (c: SortCol) => void;
+  tip?: string;
+  last?: boolean;
+}) {
+  const active = sort.col === col;
+  return (
+    <th className={`${last ? "px-4" : "px-3"} py-2.5 text-right font-normal`}>
+      <span className="inline-flex items-center justify-end gap-1">
+        <button
+          type="button"
+          onClick={() => onSort(col)}
+          className={`inline-flex items-center gap-0.5 hover:text-[var(--accent)] ${active ? "text-[var(--accent)]" : ""}`}
+          title={`Ordenar por ${label}`}
+        >
+          {label}
+          {active ? (sort.dir === 1 ? <ArrowUp size={11} /> : <ArrowDown size={11} />) : null}
+        </button>
+        {tip ? <InfoTip text={tip} /> : null}
+      </span>
+    </th>
+  );
+}
+
+export function ScreenerTable({ limit = 40 }: { limit?: number }) {
   const router = useRouter();
   const [rows, setRows] = useState<Row[]>([]);
   const [provenance, setProvenance] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [query, setQuery] = useState("");
+  const [sig, setSig] = useState<"all" | "rico" | "barato">("all");
+  const [sort, setSort] = useState<{ col: SortCol | null; dir: 1 | -1 }>({ col: null, dir: -1 });
 
   useEffect(() => {
     let alive = true;
@@ -80,19 +116,52 @@ export function ScreenerTable() {
     };
   }, []);
 
-  const filtered = rows
-    .filter((r) => r.ticker.toUpperCase().includes(query.toUpperCase()))
-    .slice(0, 40);
+  function toggleSort(col: SortCol) {
+    setSort((s) => (s.col === col ? { col, dir: (s.dir === 1 ? -1 : 1) as 1 | -1 } : { col, dir: -1 }));
+  }
+
+  let view = rows.filter((r) => r.ticker.toUpperCase().includes(query.toUpperCase()));
+  if (sig !== "all") view = view.filter((r) => r.iv_vs_rv === sig);
+  if (sort.col) {
+    const col = sort.col;
+    view = [...view].sort((a, b) => {
+      const av = a[col], bv = b[col];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      return (av < bv ? -1 : av > bv ? 1 : 0) * sort.dir;
+    });
+  }
+  const filtered = view.slice(0, limit);
+
+  const chip = (key: "all" | "rico" | "barato", text: string) => (
+    <button
+      type="button"
+      onClick={() => setSig(key)}
+      className={`rounded-lg px-3 py-1.5 text-[12px] ${
+        sig === key ? "bg-[var(--bg-surface)] text-[var(--accent)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]"
+      }`}
+    >
+      {text}
+    </button>
+  );
 
   return (
     <div>
-      <input
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="filtrar ativos…"
-        className="mb-3 w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2 text-[13px] outline-none"
-        style={{ color: "var(--text-primary)" }}
-      />
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="filtrar por ticker…"
+          className="w-56 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2 text-[13px] outline-none"
+          style={{ color: "var(--text-primary)" }}
+        />
+        <div className="flex gap-1.5">
+          {chip("all", "Todos")}
+          {chip("rico", "Rico")}
+          {chip("barato", "Barato")}
+        </div>
+      </div>
       {loading ? (
         <p className="text-[13px] text-[var(--text-tertiary)]">carregando o mercado…</p>
       ) : error ? (
@@ -109,20 +178,12 @@ export function ScreenerTable() {
                 <tr className="bg-[var(--bg-surface)] text-left text-[var(--text-secondary)]">
                   <th className="px-4 py-2.5 font-normal">Ativo</th>
                   <th className="px-3 py-2.5 font-normal">Tipo</th>
-                  <th className="px-3 py-2.5 text-right font-normal">Último</th>
-                  <th className="px-3 py-2.5 text-right font-normal">Var %</th>
-                  <th className="px-3 py-2.5 text-right font-normal">Liquidez</th>
-                  <th className="px-3 py-2.5 text-right font-normal">IV</th>
-                  <th className="px-3 py-2.5 text-right font-normal">
-                    <span className="inline-flex items-center gap-1">IV Rank
-                      <InfoTip text="Onde a IV de hoje está na faixa mín–máx da janela (~1 ano). 0 = mínimo, 100 = máximo. Alto = volatilidade cara vs a própria história do ativo." />
-                    </span>
-                  </th>
-                  <th className="px-3 py-2.5 text-right font-normal">
-                    <span className="inline-flex items-center gap-1">VRP
-                      <InfoTip text="Prêmio de variância = IV − RV, em pontos de vol. Positivo = implícita acima da realizada (você é pago por vender volatilidade)." />
-                    </span>
-                  </th>
+                  <SortTh label="Último" col="ultimo" sort={sort} onSort={toggleSort} />
+                  <SortTh label="Var %" col="var_pct" sort={sort} onSort={toggleSort} />
+                  <SortTh label="Liquidez" col="liquidez" sort={sort} onSort={toggleSort} />
+                  <SortTh label="IV" col="iv" sort={sort} onSort={toggleSort} tip="Volatilidade implícita: o 'nervosismo' que o mercado embute no preço da opção (% ao ano)." />
+                  <SortTh label="IV Rank" col="iv_rank" sort={sort} onSort={toggleSort} tip="Onde a IV de hoje está na faixa mín–máx da janela (~1 ano). 0 = mínimo, 100 = máximo. Alto = volatilidade cara vs a própria história do ativo." />
+                  <SortTh label="VRP" col="vrp" sort={sort} onSort={toggleSort} tip="Prêmio de variância = IV − RV, em pontos de vol. Positivo = implícita acima da realizada (você é pago por vender volatilidade)." />
                   <th className="px-4 py-2.5 text-right font-normal">
                     <span className="inline-flex items-center gap-1">IV vs RV
                       <InfoTip text="Heurística (não recomendação): IV implícita vs RV realizada. Rico = IV > RV; Barato = IV < RV." />
@@ -160,14 +221,15 @@ export function ScreenerTable() {
               </tbody>
             </table>
           </div>
-          <div className="mt-3 flex items-center gap-4 text-[11.5px] text-[var(--text-tertiary)]">
+          <div className="mt-3 flex flex-wrap items-center gap-4 text-[11.5px] text-[var(--text-tertiary)]">
             <span className="flex items-center gap-1.5">
               <i className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "var(--accent)" }} /> Rico = IV &gt; RV
             </span>
             <span className="flex items-center gap-1.5">
               <i className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "var(--up)" }} /> Barato = IV &lt; RV
             </span>
-            <span>fonte: {provenance || "—"} · heurística, não recomendação</span>
+            <span>{filtered.length} de {view.length} ativos · clique num cabeçalho para ordenar</span>
+            <span className="ml-auto">fonte: {provenance || "—"} · heurística, não recomendação</span>
           </div>
         </>
       )}
