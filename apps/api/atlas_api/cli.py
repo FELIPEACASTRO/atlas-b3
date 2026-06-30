@@ -12,14 +12,24 @@ ATLAS_DB env or data_cache/atlas.db) — the same DB the API reads.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import io
 import os
 import urllib.request
 import zipfile
 
+from atlas_api.data.brapi import fetch_dividend_yields
 from atlas_api.data.ingest import ingest_cotahist
 
 _URL = "https://bvmf.bmfbovespa.com.br/InstDados/SerHist/COTAHIST_D{date}.ZIP"
+
+# B3 option liquidity concentrates here; brapi serves PETR4/VALE3/ITUB4/MGLU3 free,
+# the rest need BRAPI_TOKEN. Failures are skipped (q falls back to 0), so a long
+# list is harmless offline.
+_LIQUID_UNDERLYINGS = [
+    "PETR4", "VALE3", "ITUB4", "MGLU3", "BBAS3", "BBDC4", "BOVA11",
+    "B3SA3", "ABEV3", "PRIO3", "ITSA4", "PETR3", "VALE5", "WEGE3",
+]
 
 
 def download_cotahist(date: str, dest_dir: str) -> str:
@@ -42,18 +52,30 @@ def main(argv: list[str] | None = None) -> None:
     ing.add_argument("--db", default=os.environ.get("ATLAS_DB", "data_cache/atlas.db"))
     ing.add_argument("--cache", default="data_cache/cotahist")
     ing.add_argument("--rate", type=float, default=None, help="risk-free override (else live BCB-SGS)")
+    ing.add_argument("--no-dividends", action="store_true", help="skip brapi dividend-yield (q) fetch")
     args = parser.parse_args(argv)
 
     if os.path.dirname(args.db):
         os.makedirs(os.path.dirname(args.db), exist_ok=True)
     os.makedirs(args.cache, exist_ok=True)
 
+    q_by_ticker: dict[str, float] = {}
+    if not args.no_dividends:
+        # use the era's trailing-12m yield for backfills, not today's (brapi keeps
+        # historical dividends; the parser filters by asof). Latest --date = asof.
+        q_asof = None
+        if args.date:
+            q_asof = max(dt.datetime.strptime(d, "%d%m%Y").date() for d in args.date)
+        q_by_ticker = fetch_dividend_yields(_LIQUID_UNDERLYINGS, asof=q_asof)
+        print(f"dividend yields (brapi, asof={q_asof or 'today'}): {len(q_by_ticker)} tickers -> "
+              + (", ".join(f"{t}={v:.2%}" for t, v in sorted(q_by_ticker.items())) or "(none)"))
+
     files = list(args.file)
     for d in args.date:
         print(f"baixando COTAHIST {d} ...")
         files.append(download_cotahist(d, args.cache))
     for path in files:
-        total = ingest_cotahist(path, args.db, rate=args.rate)
+        total = ingest_cotahist(path, args.db, rate=args.rate, q_by_ticker=q_by_ticker)
         print(f"ingerido {os.path.basename(path)} -> {total} instrumentos | db={args.db}")
 
 

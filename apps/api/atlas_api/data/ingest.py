@@ -37,7 +37,19 @@ def _years_to_expiry(asof: dt.date, venc: dt.date) -> float:
     return year_fraction(asof, venc)
 
 
-def ingest_cotahist(path: str, db_path: str, *, rate: float | None = None, q: float = 0.0) -> int:
+def _pct_change(prev: float | None, last: float) -> float | None:
+    """Percent change from a prior close, or None when there is no usable prior."""
+    return round((last / prev - 1) * 100, 2) if prev else None
+
+
+def ingest_cotahist(
+    path: str,
+    db_path: str,
+    *,
+    rate: float | None = None,
+    q: float = 0.0,
+    q_by_ticker: dict[str, float] | None = None,
+) -> int:
     quotes = parse_file(path)
     if quotes and len({qt.data for qt in quotes}) > 1:
         # the daily file is mono-date; an annual file would make asof wrong and
@@ -51,6 +63,8 @@ def ingest_cotahist(path: str, db_path: str, *, rate: float | None = None, q: fl
         rate = fetch_annual_rate() or _DEFAULT_RATE
     stocks = {qt.ticker: qt for qt in quotes if qt.tipo == "acao"}
     stock_by_isin = {qt.isin: qt.ticker for qt in quotes if qt.tipo == "acao" and qt.isin}
+    # real dividend yield per underlying (brapi); COTAHIST has none, so default q=0.
+    q_map = q_by_ticker or {}
 
     conn = store.connect(db_path)
     store.upsert_prices(
@@ -72,14 +86,15 @@ def ingest_cotahist(path: str, db_path: str, *, rate: float | None = None, q: fl
         iv = delta = gamma = vega = None
         if base and qt.strike and qt.venc:
             T = _years_to_expiry(asof, qt.venc)
-            iv_val = implied_vol(qt.tipo, qt.preco_ult, base.preco_ult, qt.strike, rate, q, T)
+            q_u = q_map.get(underlying, q)  # real dividend yield when known, else 0
+            iv_val = implied_vol(qt.tipo, qt.preco_ult, base.preco_ult, qt.strike, rate, q_u, T)
             # economic-validity gate, not just NaN: an at-intrinsic/stale EOD print
             # can yield an absurd vol (real data: 464%) that reprices with non-trivial
             # vega and would otherwise slip through. Suppress IV *and* its greeks, and
             # keep it out of the ATM pick so the underlying signal stays clean.
             if iv_is_reliable(qt.tipo, qt.preco_ult, base.preco_ult, qt.strike, iv_val):
                 iv = round(iv_val, 4)
-                g = bs_greeks(qt.tipo, base.preco_ult, qt.strike, rate, q, T, iv_val)
+                g = bs_greeks(qt.tipo, base.preco_ult, qt.strike, rate, q_u, T, iv_val)
                 delta, gamma, vega = round(g["delta"], 4), round(g["gamma"], 6), round(g["vega"], 4)
                 dist = abs(qt.strike - base.preco_ult)
                 if underlying not in atm or dist < atm[underlying][0]:
@@ -94,8 +109,13 @@ def ingest_cotahist(path: str, db_path: str, *, rate: float | None = None, q: fl
 
     stock_inst_rows: list[tuple] = []
     for qt in stocks.values():
-        var = round((qt.preco_ult / qt.preco_abe - 1) * 100, 2) if qt.preco_abe else None
         closes = [c for (_o, _h, _l, c) in store.price_history(conn, qt.ticker)]
+        # closes[-1] is today's close (just upserted); the prior session gives a
+        # true day-over-day var. Fall back to intraday open only on the first session.
+        prev_close = closes[-2] if len(closes) >= 2 else None
+        var = _pct_change(prev_close, qt.preco_ult)
+        if var is None and qt.preco_abe:
+            var = _pct_change(qt.preco_abe, qt.preco_ult)
         rv = realized_vol(closes) if len(closes) >= _MIN_HISTORY else float("nan")
         atm_iv = atm[qt.ticker][1] if qt.ticker in atm else None
         sig = classify(atm_iv, rv) if (atm_iv is not None and rv == rv) else None

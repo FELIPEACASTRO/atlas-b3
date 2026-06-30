@@ -3,9 +3,35 @@ import os
 import pytest
 
 from atlas_api.data import store
-from atlas_api.data.ingest import ingest_cotahist
+from atlas_api.data.ingest import _pct_change, ingest_cotahist
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "cotahist_sample.txt")
+
+
+def test_pct_change_handles_missing_prior():
+    assert _pct_change(37.0, 37.78) == 2.11
+    assert _pct_change(None, 37.78) is None
+    assert _pct_change(0.0, 37.78) is None  # no division by a zero prior
+
+
+def test_ingest_var_pct_uses_prior_close_not_intraday(tmp_path):
+    # var % must be day-over-day (vs prior session close), not intraday open->close (S7)
+    db = str(tmp_path / "v.db")
+    conn = store.connect(db)
+    store.upsert_prices(conn, [("PETR4", "2020-01-01", 36.5, 37.1, 36.4, 37.0)])
+    conn.commit()
+    conn.close()
+    ingest_cotahist(FIXTURE, db, rate=0.1165)  # fixture PETR4 close = 37.78
+    conn = store.connect(db)
+    assert store.get_instrument(conn, "PETR4")["var_pct"] == 2.11  # (37.78/37.0 - 1)*100
+    conn.close()
+
+
+def test_ingest_accepts_dividend_yield_map(tmp_path):
+    # q_by_ticker must thread through without error; PETR3 gets a real yield
+    db = str(tmp_path / "q.db")
+    n = ingest_cotahist(FIXTURE, db, rate=0.1165, q_by_ticker={"PETR3": 0.07})
+    assert n >= 3
 
 
 def test_ingest_rejects_multi_date_file(tmp_path):
