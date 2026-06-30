@@ -53,8 +53,7 @@
 
 - [ ] **Step 1 — teste que falha:** (a) `r1_trend(returns, halflife)` é soma ponderada exponencial (pesos somam ~1; reage a tendência recente); (b) `sigma_path` = √(soma ponderada de r²) ≥ 0; (c) ambos são O(1) por update (estado recursivo) — testar que `update(state, r)` bate o cálculo batch.
 - [ ] **Step 2/3 — implementar:** kernels exponenciais (representação 2-exp, Markoviana), recursivos.
-- [ ] **Step 4 — GATE (a tarefa decisiva):** teste de integração — `har_leverage + [r1, sigma_path]` deve bater `har_leverage` puro em walk-forward (QLIKE) **E** sobreviver no MCS. ⚠ R₁ se sobrepõe ao leverage; **se não adicionar ganho estatístico, NÃO promover** (o teste decide, não a vontade). Documentar o resultado no commit.
-- [ ] **Step 5 — commit:** `feat(predict): PDV features (gated against HAR-Leverage)`.
+- [x] **GATE — REJEITOU (FEITO, commit `29572a1`):** walk-forward HAR-Lev vs HAR-Lev+PDV no dado real, DM sobre QLIKE → **PDV não passa em nenhum nome** (PETR4 p=0.93, VALE3 p=0.77, BBAS3 p=0.98, BOVA11 p=0.34; QLIKE idêntico até a 4ª casa). HAR-RV+leverage já captura tendência/vol-recente; 1 ano deixa o sinal abaixo do gate. **NÃO promovido** — `pdv.py` fica como bloco testado, não ligado no forecast. Resultado negativo é resultado.
 
 ### Task 3: HARX (HAR + B3-VIX + flag COPOM)
 
@@ -82,10 +81,7 @@
 
 **Files:** Create `predict/ssvi.py` · Test `tests/predict/test_ssvi.py`
 
-- [ ] **Step 1 — teste que falha:** `fit_ssvi(strikes, ivs, T)` ajusta a smile sem arbitragem (variância total monotônica em T; sem butterfly arb — densidade ≥ 0); `risk_neutral_density` integra ≈ 1; **retorna None/recusa** quando há < ~5 strikes líquidos (gate de liquidez B3).
-- [ ] **Step 2/3 — implementar:** SSVI (Gatheral-Jacquier) calibrado por `scipy.optimize.least_squares`; Breeden-Litzenberger `∂²C/∂K²`; checagem de no-arbitragem; gate de liquidez.
-- [ ] **Step 4 — passar.** (Não é "bater HAR" — é a densidade de MERCADO, usada para COMPARAR com a física.)
-- [ ] **Step 5 — commit:** `feat(predict): SSVI surface + risk-neutral density (liquid names)`.
+- [x] **FEITO (commits `8510cc0`+`29f1d3b`):** `predict/ssvi.py` — SVI raw (Gatheral-Jacquier) + densidade de Gatheral (≡ Breeden-Litzenberger) + checagem butterfly g(k)≥0. **2 achados medidos no dado real, ambos no design:** (1) smile crua de nome individual é ruidosa demais p/ fit arb-free (3/4 com arbitragem/RMSE 5-7pts) → núcleo ATM estreito (0.85-1.15) + peso ATM → PETR4/VALE3/BOVA11 arb-free a ~2pts; **gate de qualidade** (`usable` = arb-free E RMSE≤0.04) recusa o resto (BBAS3); (2) seleção de vencimento prefere os **mensais ricos** (≥20 strikes), não semanais finos. Ligado no engine: a vol SVI vira a vol de mercado (mercado/física/gap consistentes), fallback ao ponto IV; painel mostra "mercado (smile SVI) · N strikes · sem arbitragem · densidade RN". 4 testes, suíte 229 verde, verificado no preview. **eSSVI multi-slice (sem calendar arb) fica p/ depois — 1 slice basta p/ o horizonte único.**
 
 ### Task 6: DCP — cobertura conformal em vol alta + recalibração isotônica
 
@@ -94,7 +90,7 @@
 - [ ] **Step 1 — teste que falha (DCP):** numa série com **explosão de vol** no fim, a cobertura do `dcp_interval` ≥ nominal, enquanto o split-conformal de ponto cai (< nominal). É o ponto do DCP.
 - [ ] **Step 2/3 — implementar:** Distributional Conformal (conformaliza sobre a CDF prevista).
 - [ ] **Step 4 — GATE:** cobertura em regime de vol alta ≥ split-conformal, sem alargar demais os intervalos em regime calmo (trade-off medido).
-- [ ] **Step 5 — recalibração isotônica (herdada do ML-1, spec §131):** teste-que-falha → PAVA **pure-Python** (`calibrate.py`) que mapeia o PIT observado para uniforme; verificar que o PIT pós-isotônica melhora no KS sem quebrar a cobertura conformal. Commit: `feat(predict): isotonic PIT recalibration (PAVA, pure-Python)` + `feat(predict): distributional conformal (DCP) for high-vol coverage`.
+- [x] **Step 5 — recalibração isotônica (FEITA, commit `8c258be`):** `calibrate.py` com PAVA pure-Python + recalibrador de Kuleshov. **ACHADO medido (rigor):** o split ESTÁTICO **piora** sob não-estacionariedade (derrubou o PIT da VALE3 0.67→0.0001) — rejeitado; a versão **ONLINE (janela rolante)** conserta o caso quebrado (PETR4 PIT 0.006→0.79) e é inócua nos já calibrados → entrou pela porta do gate. Ligada no engine (POP/quantis servidos recalibrados via R/R⁻¹) + painel reporta cru→recal. No dado real: os 3 nomes pit_ok=True, cobertura ~0.80. 6 testes, suíte 225 verde.
 
 ### Task 7: Challenger probabilístico (NGBoost / quantile-GBM)
 
