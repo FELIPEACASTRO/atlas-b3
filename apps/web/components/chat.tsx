@@ -104,8 +104,8 @@ export function Chat() {
       });
       if (!r.ok || !r.body) {
         throw new Error(r.status === 503
-          ? "sem base de dados carregada — rode a ingestão (ATLAS_DB)"
-          : `erro ${r.status} ao consultar o ATLAS`);
+          ? "Ainda não há dados de mercado carregados no terminal — rode a ingestão para começar."
+          : `Não consegui consultar o ATLAS agora (erro ${r.status}). Tente novamente em instantes.`);
       }
       const reader = r.body.getReader();
       const decoder = new TextDecoder();
@@ -210,7 +210,7 @@ export function Chat() {
         </button>
       </form>
       <p className="mt-1.5 px-1 text-[10.5px] text-[var(--text-tertiary)]">
-        dados de fechamento (EOD) · o ATLAS não prevê o futuro nem dá ordem de compra/venda
+        dados de fechamento do dia (EOD) · o ATLAS explica e analisa, mas não prevê o futuro nem dá ordem de compra/venda
       </p>
     </div>
   );

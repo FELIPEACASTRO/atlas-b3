@@ -24,9 +24,9 @@ _HELP = (
     "• \"calls baratas da VALE3\" — opções filtradas e ordenadas\n"
     "• \"vale a pena a PETRA38?\" — painel de decisão dos dois lados\n"
     "• \"quais ativos têm vol cara?\" — ranking por IV Rank\n\n"
-    "Para perguntas livres em linguagem natural, configure uma chave de IA "
-    "(variável ANTHROPIC_API_KEY) e instale o pacote `anthropic` — aí o chat passa a "
-    "entender qualquer pergunta, sempre ancorado nestes mesmos dados."
+    "Para perguntas livres em linguagem natural, configure uma chave de IA gratuita "
+    "(OpenRouter ou Gemini) — aí o chat passa a entender qualquer pergunta, "
+    "sempre ancorado nestes mesmos dados reais."
 )
 
 
@@ -92,8 +92,8 @@ def answer(question: str, conn) -> tuple[str, list[dict], str | None]:
     ql = q.lower()
     up = q.upper()
     tool_calls: list[dict] = []
-    note = ("Modo limitado (sem chave de IA): respondo padrões comuns. "
-            "Configure ANTHROPIC_API_KEY para perguntas livres.")
+    note = ("Modo simples (sem chave de IA): respondo padrões comuns. "
+            "Configure uma chave gratuita (OpenRouter/Gemini) para perguntas livres.")
 
     tickers = _TICKER_RE.findall(up)
     # an explicit option code (it resolves in the options table) -> decision panel

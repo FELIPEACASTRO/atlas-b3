@@ -70,7 +70,7 @@ export function MetricCards() {
         })}
       </div>
       <div className="mb-4 text-[11px] text-[var(--text-tertiary)]">
-        fonte: {offline ? "API offline" : s?.provenance ?? "carregando…"}
+        fonte: {offline ? "API fora do ar" : s?.provenance ?? "carregando…"}
       </div>
     </>
   );

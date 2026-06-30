@@ -21,5 +21,5 @@ def test_vol_cara_routes_to_ranking(conn):
 
 def test_unparseable_question_returns_help_with_key_hint(conn):
     text, calls, note = fallback.answer("oi, tudo certo por aí?", conn)
-    assert "ANTHROPIC_API_KEY" in text
+    assert "gratuita" in text and ("OpenRouter" in text or "Gemini" in text)
     assert calls == [] and note  # no tools fired, but it's honest about the limit
