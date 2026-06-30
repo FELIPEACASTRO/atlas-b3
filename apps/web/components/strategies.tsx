@@ -9,6 +9,7 @@ type Strategy = {
   defined_risk: boolean;
   vol_stance: string;
   lots: number;
+  sizing: { conservador: number; moderado: number; agressivo: number };
   cost: number;
   max_loss: number;
   max_gain: number;
@@ -28,6 +29,7 @@ type Resp = {
   strategies: Strategy[];
   provenance: string;
   note?: string;
+  liquidez_caveat?: string;
 };
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
@@ -147,8 +149,9 @@ export function Strategies() {
       </div>
 
       {d && d.strategies.length ? (
-        <p className="mt-3 text-[10.5px] text-[var(--text-tertiary)]">
-          POP = probabilidade de lucro; EV = valor esperado, ambos medidos na densidade física calibrada · fonte: {d.provenance} · {d.note}
+        <p className="mt-3 text-[10.5px] leading-relaxed text-[var(--text-tertiary)]">
+          POP = probabilidade de lucro; EV = valor esperado, ambos medidos na densidade física calibrada · números do perfil <b>moderado</b> · fonte: {d.provenance} · {d.note}
+          {d.liquidez_caveat ? <><br />⚠ {d.liquidez_caveat}</> : null}
         </p>
       ) : null}
     </div>
@@ -180,8 +183,8 @@ function StrategyCard({ s, top }: { s: Strategy; top: boolean }) {
         ))}
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-[var(--text-tertiary)]">
-        <span>lotes: <b className="mono" style={{ color: "var(--text-secondary)" }}>{s.lots}</b></span>
-        <span>risco máx: <b className="mono" style={{ color: "var(--down)" }}>{brl(s.max_loss)}</b></span>
+        <span>lotes <span className="text-[9.5px]">(cons/mod/agr)</span>: <b className="mono" style={{ color: "var(--text-secondary)" }}>{s.sizing.conservador}/{s.sizing.moderado}/{s.sizing.agressivo}</b></span>
+        <span>risco máx <span className="text-[9.5px]">(mod)</span>: <b className="mono" style={{ color: "var(--down)" }}>{brl(s.max_loss)}</b></span>
         <span>ganho máx: <b className="mono" style={{ color: "var(--up)" }}>{s.defined_risk ? brl(s.max_gain) : "alto"}</b></span>
         {s.breakevens.length ? <span>breakeven: <b className="mono" style={{ color: "var(--text-secondary)" }}>{s.breakevens.join(" / ")}</b></span> : null}
       </div>

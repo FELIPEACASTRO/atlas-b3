@@ -290,4 +290,5 @@ def build_strategies(
         "market_vs_physical": pred["market_vs_physical"],
         "strategies": cat[:8],
         "note": "análise probabilística (POP + valor esperado sobre a densidade), não recomendação de compra/venda",
+        "liquidez_caveat": "sizing por risco; a liquidez real da opção (volume/contratos em aberto) NÃO está na base EOD — confira antes de executar",
     }

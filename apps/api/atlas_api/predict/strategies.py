@@ -82,6 +82,10 @@ def evaluate(legs: list[Leg], dens: Density, spot: float, *, mult: int = 100, lo
 
 # ---- Catálogo de estratégias (build_catalog) ----
 
+# perfis de risco = fração do capital arriscada por trade (sizing; o usuário escolhe a postura)
+_PROFILES = {"conservador": 0.25, "moderado": 0.5, "agressivo": 1.0}
+
+
 def _nearest(opts: list[dict], target: float) -> dict | None:
     return min(opts, key=lambda o: abs(o["strike"] - target)) if opts else None
 
@@ -135,20 +139,23 @@ def build_catalog(spot: float, dens: Density, chain: list[dict], *, visao: str,
     want = "neutro" if visao == "renda" else visao
     results: list[dict] = []
     for name, thesis, defined, legs in _recipes(spot, calls, puts):
-        ev1 = evaluate(legs, dens, spot, mult=mult, lots=1)
-        per_lot_loss = abs(ev1["max_loss"]) or 1.0
-        if defined:
-            lots = int(capital // per_lot_loss)
-        else:
-            lots = int(capital // (spot * mult * 0.20))             # margem aproximada p/ naked
+        e1 = evaluate(legs, dens, spot, mult=mult, lots=1)          # métricas por lote
+        # risco por lote: a perda máxima (definido) ou uma margem aproximada (naked, sem cap de
+        # liquidez — a base EOD não traz volume/contratos em aberto)
+        risk_per_lot = abs(e1["max_loss"]) if defined else spot * mult * 0.20
+        if risk_per_lot <= 0:
+            continue
+        sizing = {p: int((capital * frac) // risk_per_lot) for p, frac in _PROFILES.items()}
+        lots = sizing["moderado"]                                   # default = moderado
         if lots < 1:
             continue
-        ev = evaluate(legs, dens, spot, mult=mult, lots=lots)
         results.append({
-            "name": name, "thesis": thesis, "defined_risk": defined, "lots": lots,
-            "vol_stance": "vender" if any(leg.action == "short" for leg in legs) and ev["cost"] <= 0 else "comprar",
+            "name": name, "thesis": thesis, "defined_risk": defined, "lots": lots, "sizing": sizing,
+            "vol_stance": "vender" if any(leg.action == "short" for leg in legs) and e1["cost"] <= 0 else "comprar",
             "legs": [{"kind": leg.kind, "action": leg.action, "strike": leg.strike, "premium": leg.premium} for leg in legs],
-            **ev,
+            "pop": e1["pop"], "breakevens": e1["breakevens"],       # independentes do nº de lotes
+            "cost": round(e1["cost"] * lots, 2), "max_loss": round(e1["max_loss"] * lots, 2),
+            "max_gain": round(e1["max_gain"] * lots, 2), "ev": round(e1["ev"] * lots, 2),
         })
     # ranqueia: estruturas que casam com a tese primeiro, depois maior valor esperado
     results.sort(key=lambda s: (s["thesis"] == want, s["ev"]), reverse=True)

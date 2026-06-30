@@ -26,12 +26,15 @@ def test_catalog_neutral_view_surfaces_vol_structures():
     assert any(s["thesis"] == "neutro" for s in cat[:3])
 
 
-def test_catalog_sizing_respects_capital_for_defined_risk():
+def test_catalog_sizing_three_profiles_ordered_and_bounded():
     d = physical_density(spot=38.0, sigma_iv=0.30, rv=0.30, vrp=0.0, T=30 / 365)
     cat = build_catalog(38.0, d, _synth_chain(), visao="alta", capital=8000)
     for s in cat:
-        if s.get("defined_risk") and s["lots"] > 0:
-            assert abs(s["max_loss"]) <= 8000 + 1e-6   # risco definido cabe no capital
+        sz = s["sizing"]
+        assert sz["conservador"] <= sz["moderado"] <= sz["agressivo"]      # perfis ordenados
+        if s.get("defined_risk"):
+            assert abs(s["max_loss"]) <= 8000 * 0.5 + 1e-6                 # default=moderado (≤50% do capital)
+        assert s["lots"] == sz["moderado"]                                 # 'lots' = perfil moderado
 
 
 def test_catalog_legs_describe_the_structure():
