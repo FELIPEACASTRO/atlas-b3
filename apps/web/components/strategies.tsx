@@ -168,7 +168,7 @@ export function Strategies() {
 
       {d && d.strategies.length ? (
         <p className="mt-3 text-[10.5px] leading-relaxed text-[var(--text-tertiary)]">
-          POP = probabilidade de lucro; EV = valor esperado, ambos medidos na densidade física calibrada · números do perfil <b>moderado</b> · fonte: {d.provenance} · {d.note}
+          POP = probabilidade de lucro; EV = valor esperado, ambos medidos na densidade física do motor (Student-t) · números do perfil <b>{perfil}</b> · fonte: {d.provenance} · {d.note}
           {d.liquidez_caveat ? <><br />⚠ {d.liquidez_caveat}</> : null}
         </p>
       ) : null}
