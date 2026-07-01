@@ -6,6 +6,7 @@ import { VolHistory } from "@/components/vol-history";
 import { CalibrationPanel } from "@/components/calibration-panel";
 import { EdgeMap } from "@/components/edge-map";
 import { KernelMap } from "@/components/kernel-map";
+import { FairIv } from "@/components/fair-iv";
 import { IvSurface } from "@/components/iv-surface";
 import { OptionPanel } from "@/components/option-panel";
 import { InfoTip } from "@/components/info-tip";
@@ -116,6 +117,7 @@ export function OptionsChain() {
       <CalibrationPanel ticker={ticker} />
       <EdgeMap ticker={ticker} />
       <KernelMap ticker={ticker} />
+      <FairIv ticker={ticker} />
       <IvSurface ticker={ticker} />
 
       {loading ? (

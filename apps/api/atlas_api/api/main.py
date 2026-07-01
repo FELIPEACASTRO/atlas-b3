@@ -51,6 +51,7 @@ from atlas_api.pricing.rv import realized_vol
 from atlas_api.pricing.signal import iv_rank
 from atlas_api.predict.engine import (
     build_edge_map,
+    build_fair_iv,
     build_prediction,
     build_pricing_kernel,
     build_strategies,
@@ -393,6 +394,27 @@ def kernel(ticker: str, horizon: int = 30) -> dict:
     closes = [bar[3] for bar in ohlc]
     return build_pricing_kernel(ticker=ticker, ohlc=ohlc, closes=closes, iv_history=iv_hist,
                                 spot=spot, chain=chain, asof=asof, T_days=horizon)
+
+
+@app.get("/fair-iv/{ticker}")
+def fair_iv(ticker: str, horizon: int = 30) -> dict:
+    """Fair IV: a smile justa pela nossa vol física vs a smile de mercado — o VRP por strike em vol points.
+
+    A língua do trader: quantos pontos de vol o mercado cobra acima do justo, por strike, e onde está a
+    maior oportunidade. Honesto: recusa quando a smile de mercado não é confiável.
+    """
+    ticker = ticker.upper()
+    conn = _require_conn()
+    inst = store.get_instrument(conn, ticker)
+    spot = inst.get("ultimo") if inst else None
+    ohlc = store.price_history(conn, ticker, limit=400)
+    iv_hist = store.iv_history(conn, ticker, limit=400)
+    chain = store.query_chain(conn, ticker, limit=5000)
+    asof = store.get_meta(conn, "asof")
+    conn.close()
+    closes = [bar[3] for bar in ohlc]
+    return build_fair_iv(ticker=ticker, ohlc=ohlc, closes=closes, iv_history=iv_hist,
+                         spot=spot, chain=chain, asof=asof, T_days=horizon)
 
 
 @app.get("/option/{ticker}", response_model=OptionAnalysisOut)

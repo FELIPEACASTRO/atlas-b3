@@ -17,6 +17,7 @@ from atlas_api.pricing.signal import iv_rank
 from .calibrate import IsotonicRecalibrator, online_recalibrator
 from .distribution import Density, physical_density
 from .edge import premium_map
+from .fair_iv import fair_iv_smile
 from .kernel import kernel_shape, pricing_kernel
 from .forecast import har_leverage, vol_ensemble
 from .regime import regime, strategy_bias
@@ -404,4 +405,34 @@ def build_pricing_kernel(
         **base, "dte": dte, "market_vs_physical": pred["market_vs_physical"], "regime": pred["regime"],
         "kernel": kern, "shape": kernel_shape(kern),
         "note": "razão densidade risco-neutra / física = pricing kernel (SDF) empírico — análise, não recomendação",
+    }
+
+
+def build_fair_iv(
+    *, ticker: str, ohlc: list[tuple], closes: list[float], iv_history: list[float],
+    spot: float, chain: list[dict], asof: str | None, T_days: int = 30,
+) -> dict:
+    """FAIR IV: a smile "justa" pela nossa vol física vs a smile de mercado, em VOL POINTS por strike.
+
+    O VRP decomposto por strike na língua do trader (vol points). Recusa honesto se a smile não é
+    confiável. Nota: física simétrica → linha justa ~plana; o gap é leitura de nível (VRP) forte.
+    """
+    prov = f"COTAHIST EOD {asof}" if asof else "COTAHIST EOD"
+    base = {"ticker": ticker, "spot": round(spot, 2) if spot else None, "provenance": prov, "asof": asof}
+    pred = build_prediction(ticker=ticker, ohlc=ohlc, closes=closes, iv_history=iv_history,
+                            spot=spot, chain=chain, asof=asof, T_days=T_days)
+    if pred["sigma"] is None or spot is None or spot <= 0:
+        return {**base, "smile": None, "note": "histórico insuficiente para a fair IV"}
+    fit, dte = _fit_smile_near(chain, spot, asof, T_days)
+    if fit is None:
+        return {**base, "smile": None, "market_vs_physical": pred["market_vs_physical"],
+                "note": "smile de mercado não confiável (sem arbitragem-livre) — fair IV omitida"}
+    phys_vol = pred["market_vs_physical"]["physical"]
+    grid = [round(float(x), 4) for x in np.linspace(0.85, 1.15, 25)]
+    fv = fair_iv_smile(spot=spot, forward=fit["forward"], phys_vol=phys_vol,
+                       svi_params=fit["params"], T=dte / 365.0, moneyness=grid)
+    return {
+        **base, "dte": dte, "market_vs_physical": pred["market_vs_physical"], "regime": pred["regime"],
+        **fv,
+        "note": "smile de mercado vs vol física justa (VRP por strike, em vol points) — análise, não recomendação",
     }
