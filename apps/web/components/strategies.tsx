@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { EdgeBacktest } from "@/components/edge-backtest";
+
 type Leg = { kind: string; action: string; strike: number; premium: number };
 type Strategy = {
   name: string;
@@ -172,6 +174,8 @@ export function Strategies() {
           {d.liquidez_caveat ? <><br />⚠ {d.liquidez_caveat}</> : null}
         </p>
       ) : null}
+
+      <EdgeBacktest ticker={ticker} />
     </div>
   );
 }

@@ -51,12 +51,17 @@ from atlas_api.pricing.rv import realized_vol
 from atlas_api.pricing.signal import iv_rank
 from atlas_api.predict.engine import (
     build_calibration_health,
+    build_edge_backtest,
     build_edge_map,
     build_fair_iv,
     build_prediction,
     build_pricing_kernel,
     build_strategies,
 )
+
+# universo líquido (IV + OHLC confiáveis) para o backtest gated do edge
+_BACKTEST_UNIVERSE = ["PETR4", "VALE3", "ITUB4", "BBDC4", "BBAS3", "B3SA3",
+                      "ABEV3", "WEGE3", "PRIO3", "BOVA11", "ITSA4", "GGBR4"]
 
 app = FastAPI(title="ATLAS API", version="0.1.0")
 app.add_middleware(
@@ -432,6 +437,29 @@ def calibration_health(ticker: str) -> dict:
     conn.close()
     closes = [bar[3] for bar in ohlc]
     return build_calibration_health(ticker=ticker, ohlc=ohlc, closes=closes, asof=asof)
+
+
+@app.get("/edge-backtest/{ticker}")
+def edge_backtest(ticker: str) -> dict:
+    """Backtest econômico do edge: o sinal de VRP físico ('vender vol cara') sobrevive à deflação?
+
+    Walk-forward sobre o universo líquido, Deflated Sharpe (López de Prado) descontando o multiple-
+    testing. Verdicto HONESTO — registra se não passa (com ~1 ano a potência é baixa). Curva de
+    equity do ativo pedido. A prova econômica que falta ao Edge Map.
+    """
+    ticker = ticker.upper()
+    conn = _require_conn()
+    names = list(dict.fromkeys([ticker, *_BACKTEST_UNIVERSE]))
+    universe: list[dict] = []
+    for nm in names:
+        ohlc = store.price_history(conn, nm, limit=400)
+        iv_hist = store.iv_history(conn, nm, limit=400)
+        if not ohlc or not iv_hist:
+            continue
+        universe.append({"ticker": nm, "ohlc": ohlc, "closes": [b[3] for b in ohlc], "iv_history": iv_hist})
+    asof = store.get_meta(conn, "asof")
+    conn.close()
+    return build_edge_backtest(ticker=ticker, universe=universe, asof=asof)
 
 
 @app.get("/option/{ticker}", response_model=OptionAnalysisOut)
