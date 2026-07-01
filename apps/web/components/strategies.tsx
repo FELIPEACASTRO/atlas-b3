@@ -10,7 +10,7 @@ type Strategy = {
   vol_stance: string;
   lots: number;
   sizing: { conservador: number; moderado: number; agressivo: number };
-  per_lot: { cost: number; max_loss: number; max_gain: number; ev: number };
+  per_lot: { cost: number; max_loss: number; max_gain: number; ev: number; cvar: number };
   cost: number;
   max_loss: number;
   max_gain: number;
@@ -181,6 +181,7 @@ function StrategyCard({ s, top, perfil }: { s: Strategy; top: boolean; perfil: "
   const ev = s.per_lot.ev * lots;
   const maxLoss = s.per_lot.max_loss * lots;
   const maxGain = s.per_lot.max_gain * lots;
+  const cvar = s.per_lot.cvar * lots;
   const evUp = ev >= 0;
   return (
     <div className="rounded-xl border p-3" style={{ borderColor: top ? "color-mix(in oklch, var(--accent) 45%, var(--border-subtle))" : "var(--border-subtle)" }}>
@@ -210,6 +211,7 @@ function StrategyCard({ s, top, perfil }: { s: Strategy; top: boolean; perfil: "
       <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-[var(--text-tertiary)]">
         <span>lotes <span className="text-[9.5px]">({perfil})</span>: <b className="mono" style={{ color: "var(--text-secondary)" }}>{lots}</b></span>
         <span>risco máx: <b className="mono" style={{ color: "var(--down)" }}>{brl(maxLoss)}</b></span>
+        <span title="perda esperada nos 5% piores desfechos (na densidade)">CVaR 5%: <b className="mono" style={{ color: "var(--down)" }}>{brl(cvar)}</b></span>
         <span>ganho máx: <b className="mono" style={{ color: "var(--up)" }}>{s.defined_risk ? brl(maxGain) : "alto"}</b></span>
         {s.breakevens.length ? <span>breakeven: <b className="mono" style={{ color: "var(--text-secondary)" }}>{s.breakevens.join(" / ")}</b></span> : null}
       </div>

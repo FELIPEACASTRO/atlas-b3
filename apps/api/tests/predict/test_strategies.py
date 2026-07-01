@@ -38,6 +38,9 @@ def test_evaluate_returns_pop_ev_and_risk_on_real_density():
     assert 0.0 < ev["pop"] < 1.0                         # prob. de lucro entre 0 e 1
     assert ev["max_loss"] < ev["ev"] < ev["max_gain"]   # valor esperado entre os extremos
     assert len(ev["breakevens"]) >= 1                    # ao menos um breakeven
+    # CVaR 5% (perda esperada na cauda ruim): entre a perda máxima e o valor esperado
+    assert ev["max_loss"] <= ev["cvar"] <= ev["ev"]
+    assert ev["cvar"] < 0                                 # é uma perda (cauda ruim)
 
 
 def test_evaluate_pop_matches_density_for_long_call():

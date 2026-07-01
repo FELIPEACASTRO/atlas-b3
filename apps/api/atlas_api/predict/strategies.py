@@ -70,10 +70,18 @@ def evaluate(legs: list[Leg], dens: Density, spot: float, *, mult: int = 100, lo
     area = float(np.trapezoid(pdf, x)) or 1.0          # normaliza resíduo de truncamento da grade
     ev = float(np.trapezoid(pnl * pdf, x) / area)
     pop = float(np.trapezoid(np.where(pnl > 0.0, pdf, 0.0), x) / area)
+    # CVaR 5% (expected shortfall): perda ESPERADA nos 5% piores desfechos — risco de cauda, não
+    # só o pior caso absoluto. Ordena o P&L, acumula massa de probabilidade, média até 5%.
+    mass = pdf / pdf.sum()
+    order = np.argsort(pnl)
+    pnl_s, mass_s = pnl[order], mass[order]
+    k = max(int(np.searchsorted(np.cumsum(mass_s), 0.05, side="right")), 1)
+    cvar = float(np.sum(pnl_s[:k] * mass_s[:k]) / np.sum(mass_s[:k]))
     return {
         "cost": round(net_cost(legs, mult=mult, lots=lots), 2),
         "max_loss": round(float(pnl.min()), 2),
         "max_gain": round(float(pnl.max()), 2),
+        "cvar": round(cvar, 2),               # perda esperada nos 5% piores casos (≤ 0)
         "ev": round(ev, 2),
         "pop": round(pop, 4),
         "breakevens": [round(b, 2) for b in _breakevens(s, pnl)],
@@ -186,9 +194,11 @@ def build_catalog(spot: float, dens: Density, chain: list[dict], *, visao: str,
             "legs": [{"kind": leg.kind, "action": leg.action, "strike": leg.strike, "premium": leg.premium} for leg in legs],
             "pop": e1["pop"], "breakevens": e1["breakevens"],       # independentes do nº de lotes
             # métricas por 1 lote — o front escala pelo perfil escolhido (lots = sizing[perfil])
-            "per_lot": {"cost": e1["cost"], "max_loss": e1["max_loss"], "max_gain": e1["max_gain"], "ev": e1["ev"]},
+            "per_lot": {"cost": e1["cost"], "max_loss": e1["max_loss"], "max_gain": e1["max_gain"],
+                        "ev": e1["ev"], "cvar": e1["cvar"]},
             "cost": round(e1["cost"] * lots, 2), "max_loss": round(e1["max_loss"] * lots, 2),
-            "max_gain": round(e1["max_gain"] * lots, 2), "ev": round(e1["ev"] * lots, 2),
+            "max_gain": round(e1["max_gain"] * lots, 2), "cvar": round(e1["cvar"] * lots, 2),
+            "ev": round(e1["ev"] * lots, 2),
         })
     # ranqueia: estruturas que casam com a tese primeiro, depois maior valor esperado
     results.sort(key=lambda s: (s["thesis"] == want, s["ev"]), reverse=True)
