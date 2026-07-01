@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 import { EdgeBacktest } from "@/components/edge-backtest";
 
@@ -91,6 +92,10 @@ export function Strategies() {
         <span className="rounded px-1.5 py-0.5 text-[10px]" style={{ background: "color-mix(in oklch, var(--accent) 14%, transparent)", color: "var(--accent)" }}>
           POP + valor esperado, não recomendação
         </span>
+        <Link href={`/decisao?t=${ticker}`} className="ml-auto rounded-lg px-2.5 py-1 text-[12px] font-medium"
+          style={{ background: "var(--accent)", color: "var(--bg-base)" }}>
+          Decidir sobre {ticker} →
+        </Link>
       </div>
       <p className="mb-3 text-[12px] text-[var(--text-tertiary)]">
         diga ativo, capital de risco, prazo e sua visão — o ATLAS monta estruturas da cadeia real e mede cada uma na densidade calibrada.

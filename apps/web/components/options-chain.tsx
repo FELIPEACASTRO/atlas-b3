@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 import { VolHistory } from "@/components/vol-history";
 import { CalibrationPanel } from "@/components/calibration-panel";
@@ -105,6 +106,13 @@ export function OptionsChain() {
             Buscar
           </button>
         </form>
+        <Link
+          href={`/decisao?t=${ticker}`}
+          className="rounded-lg px-3 py-2 text-[13px] font-medium"
+          style={{ background: "var(--accent)", color: "var(--bg-base)" }}
+        >
+          Decidir sobre {ticker} →
+        </Link>
         <div className="ml-auto flex gap-1.5">
           {(["all", "call", "put"] as const).map((k) => (
             <button

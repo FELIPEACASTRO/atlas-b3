@@ -47,6 +47,17 @@ export function Decision() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
+  // deep-link: /decisao?t=PETR4 (o ativo viaja das telas de análise — costura a jornada)
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get("t");
+    if (t) {
+      const u = t.toUpperCase();
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time deep-link sync from the URL
+      setTicker(u);
+      setInput(u);
+    }
+  }, []);
+
   useEffect(() => {
     let alive = true;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reset while refetching
