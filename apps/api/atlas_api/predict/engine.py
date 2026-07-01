@@ -586,20 +586,20 @@ def build_decision(
 def build_edge_backtest(*, ticker: str, universe: list[dict], asof: str | None, min_train: int = 30) -> dict:
     """BACKTEST ECONÔMICO do edge (gate ponta-a-ponta): o sinal de VRP físico sobrevive à deflação?
 
-    ``universe``: ``[{ticker, ohlc, closes, iv_history}]``. Roda o backtest gated (Deflated Sharpe
-    sobre o pool) e dá a curva de equity do ``ticker`` pedido. Verdicto HONESTO — registra se não
-    passa, como PDV/HARX. A prova econômica que falta ao Edge Map (o que o ORATS tem desde 2007).
+    ``universe``: ``[{ticker, ohlc, closes, dates, iv_series}]`` (``dates`` alinhado ao ``closes``;
+    ``iv_series`` = ``[(date, iv)]`` datado). Roda o backtest gated (Deflated Sharpe sobre o portfólio)
+    com join IV↔close por DATA e dá a curva de equity do ``ticker`` pedido. Verdicto HONESTO.
     """
     prov = f"COTAHIST EOD {asof}" if asof else "COTAHIST EOD"
     base = {"ticker": ticker, "provenance": prov, "asof": asof}
     uni = [{"ticker": u["ticker"], "rv": rv_series(u["ohlc"], window=YZ_WINDOW),
-            "closes": u["closes"], "iv_history": u["iv_history"]}
+            "closes": u["closes"], "dates": u["dates"], "iv_by_date": dict(u["iv_series"])}
            for u in universe if len(u["closes"]) > YZ_WINDOW + min_train + 20]
     res = run_edge_backtest(uni, window=YZ_WINDOW, min_train=min_train)
     curve = None
     tgt = next((u for u in uni if u["ticker"] == ticker), None)
     if tgt is not None:
-        pc, _ = vol_premium_pnl(tgt["iv_history"], tgt["rv"], tgt["closes"], window=YZ_WINDOW, min_train=min_train)
+        pc, _ = vol_premium_pnl(tgt["iv_by_date"], tgt["dates"], tgt["rv"], tgt["closes"], window=YZ_WINDOW, min_train=min_train)
         if len(pc) >= 20:
             cum = np.cumsum(pc)
             curve = [round(float(c), 3) for c in cum]

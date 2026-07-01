@@ -463,10 +463,12 @@ def edge_backtest(ticker: str) -> dict:
     universe: list[dict] = []
     for nm in names:
         ohlc = store.price_history(conn, nm, limit=400)
-        iv_hist = store.iv_history(conn, nm, limit=400)
-        if not ohlc or not iv_hist:
+        cs = store.close_series(conn, nm, limit=400)          # (date, close) — datado, alinhado ao ohlc
+        ivs = store.iv_series(conn, nm, limit=400)             # (date, iv) — datado, com buracos internos
+        if not ohlc or not cs or not ivs:
             continue
-        universe.append({"ticker": nm, "ohlc": ohlc, "closes": [b[3] for b in ohlc], "iv_history": iv_hist})
+        universe.append({"ticker": nm, "ohlc": ohlc, "closes": [c for _, c in cs],
+                         "dates": [d for d, _ in cs], "iv_series": ivs})
     asof = store.get_meta(conn, "asof")
     conn.close()
     return build_edge_backtest(ticker=ticker, universe=universe, asof=asof)
@@ -492,9 +494,11 @@ def decision(ticker: str, visao: str = "alta", capital: float = Query(20000.0, g
     universe: list[dict] = []
     for nm in dict.fromkeys([ticker, *_BACKTEST_UNIVERSE]):
         o = store.price_history(conn, nm, limit=400)
-        iv = store.iv_history(conn, nm, limit=400)
-        if o and iv:
-            universe.append({"ticker": nm, "ohlc": o, "closes": [b[3] for b in o], "iv_history": iv})
+        cs = store.close_series(conn, nm, limit=400)
+        ivs = store.iv_series(conn, nm, limit=400)
+        if o and cs and ivs:
+            universe.append({"ticker": nm, "ohlc": o, "closes": [c for _, c in cs],
+                             "dates": [d for d, _ in cs], "iv_series": ivs})
     conn.close()
     bt = build_edge_backtest(ticker=ticker, universe=universe, asof=asof)
     dsr = bt.get("deflated_sharpe") if bt.get("available") else None
