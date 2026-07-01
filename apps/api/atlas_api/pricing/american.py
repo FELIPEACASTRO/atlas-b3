@@ -1,10 +1,11 @@
-"""American option pricing via Cox-Ross-Rubinstein binomial tree — pure stdlib.
+"""American option pricing via the Bjerksund-Stensland 1993 closed form — pure stdlib.
 
 Captures the early-exercise premium for B3 American-style equity options, which
-Black-Scholes (European) underprices. Converges to BS as ``steps`` grows; an
+Black-Scholes (European) underprices. Fast enough to invert for IV across the whole
+chain (the CRR binomial `crr_price` here is only the validation ground-truth). An
 American call with no dividend equals its European value (early exercise is never
-optimal there). This fills the gap flagged by the impartial research: our BS
-core was pricing American series as European.
+optimal there). The price is floored at max(intrinsic, European) — the BS93 body can
+underprice deep-ITM under negative carry (0<q<r), and an American is never worth less.
 """
 from __future__ import annotations
 
@@ -25,7 +26,7 @@ def _euro_call_carry(S: float, K: float, r: float, b: float, T: float, sigma: fl
     return S * math.exp((b - r) * T) * _cdf(d1) - K * math.exp(-r * T) * _cdf(d2)
 
 
-def _phi(S: float, T: float, gamma: float, H: float, I: float, r: float, b: float, sigma: float) -> float:
+def _phi(S: float, T: float, gamma: float, H: float, I: float, r: float, b: float, sigma: float) -> float:  # noqa: E741 (I = fronteira-gatilho, notação Bjerksund-Stensland)
     sigsq = sigma * sigma
     lam = (-r + gamma * b + 0.5 * gamma * (gamma - 1.0) * sigsq) * T
     kappa = 2.0 * b / sigsq + (2.0 * gamma - 1.0)
@@ -52,8 +53,9 @@ def _bs_call(S: float, K: float, r: float, b: float, T: float, sigma: float) -> 
     if S >= trigger:
         return S - K  # immediate exercise — the DOMINANT value for deep-ITM negative carry
     alpha = (trigger - K) * trigger ** (-beta)
+    euro = _euro_call_carry(S, K, r, b, T, sigma)
     try:
-        return (
+        v = (
             alpha * S**beta
             - alpha * _phi(S, T, beta, trigger, trigger, r, b, sigma)
             + _phi(S, T, 1.0, trigger, trigger, r, b, sigma)
@@ -61,9 +63,12 @@ def _bs_call(S: float, K: float, r: float, b: float, T: float, sigma: float) -> 
             - K * _phi(S, T, 0.0, trigger, trigger, r, b, sigma)
             + K * _phi(S, T, 0.0, K, trigger, r, b, sigma)
         )
-    except OverflowError:
-        # genuine overflow only at extreme beta — never report below intrinsic
-        return max(_euro_call_carry(S, K, r, b, T, sigma), S - K)
+    except OverflowError:                        # genuíno só em beta extremo
+        v = euro
+    # A americana NUNCA vale menos que o intrínseco nem que a europeia. O corpo fechado BS93
+    # subprecifica deep-ITM com carry negativo (0<q<r) — medido: 22 casos abaixo do intrínseco, 1
+    # American<European, 50+ vega<0. O piso zera as violações sem overshoot vs CRR (validado).
+    return max(v, S - K, euro)
 
 
 def bjerksund_stensland(kind: str, S: float, K: float, r: float, q: float, T: float, sigma: float) -> float:
