@@ -46,7 +46,12 @@ def vol_premium_pnl(iv_history: list[float], rv: list[float], closes: list[float
     """
     pnl_c: list[float] = []
     pnl_u: list[float] = []
-    offset = len(closes) - len(iv_history)               # iv e closes terminam no asof; iv pode faltar no começo
+    # Alinhamento à direita assume que iv e closes terminam no MESMO dia (asof) e que a iv só falta no
+    # COMEÇO. Se iv_history > closes, a assunção falha → não fabrica (retorna vazio). Limitação conhecida:
+    # buracos INTERNOS na iv (dias sem atm_iv no meio) desalinham por posição; correção ideal = juntar por data.
+    offset = len(closes) - len(iv_history)
+    if offset < 0:
+        return [], []
     for i in range(min_train, len(rv)):
         day = i + window - 1                             # índice em closes alinhado a rv[i]
         if day + 1 >= len(closes):

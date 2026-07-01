@@ -58,8 +58,8 @@ def kernel_shape(kernel: list[dict]) -> dict:
     mny = np.array([r["moneyness"] for r in kernel], dtype=float)
     slope, intercept = (float(v) for v in np.polyfit(u, m, 1))
     ss_res = float(np.sum((m - (slope * u + intercept)) ** 2))
-    ss_tot = float(np.sum((m - m.mean()) ** 2)) + 1e-12
-    r2 = 1.0 - ss_res / ss_tot
+    ss_tot = float(np.sum((m - m.mean()) ** 2))
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 1e-9 else 0.0     # kernel plano (sem variação) → R²=0, não "confiável"
     i_min = int(np.argmin(m))
     span = float(m.max() - m.min()) + 1e-9
     min_ntm = bool(0.90 <= mny[i_min] <= 1.10)               # mínimo perto do dinheiro

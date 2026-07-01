@@ -119,6 +119,10 @@ def rationale(s: dict, *, market_iv: float | None, physical: float | None) -> st
 
 # perfis de risco = fração do capital arriscada por trade (sizing; o usuário escolhe a postura)
 _PROFILES = {"conservador": 0.25, "moderado": 0.5, "agressivo": 1.0}
+# teto de CAUDA por perfil = fração do capital tolerada como perda esperada na cauda 5% (CVaR).
+# Fonte ÚNICA compartilhada com a Camada de Decisão (`decision._kelly_lots`), para o consultor e a
+# decisão NÃO se contradizerem no sizing (medido: o % fixo estourava este teto 5-10×).
+CVAR_BUDGET = {"conservador": 0.02, "moderado": 0.05, "agressivo": 0.10}
 
 
 def _nearest(opts: list[dict], target: float) -> dict | None:
@@ -152,9 +156,9 @@ def _recipes(spot: float, calls: list[dict], puts: list[dict]) -> list[tuple]:
     out.append(("Trava de baixa (put debit)", "baixa", True, spread(p5, ap, "long", "short", need_lt=True)))
     out.append(("Trava de baixa (call credit)", "baixa", True, spread(ac, c5, "short", "long", need_lt=True)))
     if ac and ap:
-        out.append(("Compra de straddle", "neutro", False, [_leg_of(ac, "long"), _leg_of(ap, "long")]))
+        out.append(("Compra de straddle", "neutro", True, [_leg_of(ac, "long"), _leg_of(ap, "long")]))
     if c5 and p5:
-        out.append(("Compra de strangle", "neutro", False, [_leg_of(c5, "long"), _leg_of(p5, "long")]))
+        out.append(("Compra de strangle", "neutro", True, [_leg_of(c5, "long"), _leg_of(p5, "long")]))
     if c5 and c12 and p5 and p12 and c5["strike"] < c12["strike"] and p12["strike"] < p5["strike"]:
         out.append(("Condor de ferro", "neutro", True,
                     [_leg_of(c5, "short"), _leg_of(c12, "long"), _leg_of(p5, "short"), _leg_of(p12, "long")]))
@@ -184,7 +188,11 @@ def build_catalog(spot: float, dens: Density, chain: list[dict], *, visao: str,
         risk_per_lot = abs(e1["max_loss"]) if defined else spot * mult * 0.20
         if risk_per_lot <= 0:
             continue
-        sizing = {p: int((capital * frac) // risk_per_lot) for p, frac in _PROFILES.items()}
+        # teto de CAUDA: nunca dimensionar acima do orçamento de CVaR do perfil (perda esperada na
+        # cauda 5%). Alinha o consultor à Camada de Decisão — antes o % fixo estourava o teto 5-10×.
+        cvar_lot = abs(e1["cvar"]) if e1["cvar"] < 0 else risk_per_lot
+        sizing = {p: min(int((capital * frac) // risk_per_lot), int(CVAR_BUDGET[p] * capital / cvar_lot))
+                  for p, frac in _PROFILES.items()}
         lots = sizing["moderado"]                                   # default = moderado
         if lots < 1:
             continue

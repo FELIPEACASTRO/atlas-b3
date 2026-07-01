@@ -8,6 +8,8 @@ import {
   CandlestickChart,
   Briefcase,
   UserSearch,
+  Target,
+  Gauge,
   MessageSquare,
   Search,
   CornerDownLeft,
@@ -28,6 +30,8 @@ const MODULES: Cmd[] = [
   { id: "opcoes", label: "Opções", hint: "cadeia + volatilidade", icon: CandlestickChart, run: (r) => r.push("/opcoes") },
   { id: "carteira", label: "Carteira", hint: "risco e stress consolidados", icon: Briefcase, run: (r) => r.push("/carteira") },
   { id: "analista", label: "Analista", hint: "briefing honesto", icon: UserSearch, run: (r) => r.push("/analista") },
+  { id: "estrategias", label: "Estratégias", hint: "estruturas por POP / valor esperado", icon: Target, run: (r) => r.push("/estrategias") },
+  { id: "decisao", label: "Decisão", hint: "cartão de decisão: o quê, quanto, confiança", icon: Gauge, run: (r) => r.push("/decisao") },
   { id: "chat", label: "Chat com o ATLAS", hint: "pergunte sobre opções e ações", icon: MessageSquare, run: (r) => r.push("/chat") },
 ];
 

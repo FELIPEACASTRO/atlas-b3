@@ -407,8 +407,8 @@ def kernel(ticker: str, horizon: int = 30) -> dict:
 def fair_iv(ticker: str, horizon: int = 30) -> dict:
     """Fair IV: a smile justa pela nossa vol física vs a smile de mercado — o VRP por strike em vol points.
 
-    A língua do trader: quantos pontos de vol o mercado cobra acima do justo, por strike, e onde está a
-    maior oportunidade. Honesto: recusa quando a smile de mercado não é confiável.
+    A língua do trader: quantos pontos de vol o mercado cobra acima do justo, decompondo em nível (VRP)
+    e prêmio de skew. Honesto: recusa quando a smile de mercado não é confiável.
     """
     ticker = ticker.upper()
     conn = _require_conn()

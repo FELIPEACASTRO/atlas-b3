@@ -161,7 +161,7 @@ export function CalibrationPanel({ ticker }: { ticker: string }) {
       <div className="mt-3 rounded-lg border border-[var(--border-subtle)] px-3 py-2.5">
         <div className="mb-1.5 flex items-center justify-between">
           <span className="text-[11.5px] font-medium text-[var(--text-secondary)]">
-            Calibração {cal.available && cal.n_test ? <span className="text-[var(--text-tertiary)]">· últimos {cal.n_test} pregões</span> : null}
+            Calibração {cal.available && cal.n_test ? <span className="text-[var(--text-tertiary)]">· horizonte 1 dia · {cal.n_test} pregões</span> : null}
           </span>
           {cal.available ? (
             <span className="rounded px-2 py-0.5 text-[10px]"
@@ -194,7 +194,7 @@ export function CalibrationPanel({ ticker }: { ticker: string }) {
           </p>
         ) : null}
         <p className="mt-1.5 text-[10.5px] leading-relaxed text-[var(--text-tertiary)]">
-          quando o intervalo de {prob(cal.nominal)} cobre ~{prob(cal.nominal)} dos dias e o teste de forma (PIT) passa, a distribuição está honesta — não é acerto garantido, é probabilidade auditada.
+          quando o intervalo de {prob(cal.nominal)} cobre ~{prob(cal.nominal)} dos dias e o teste de forma (PIT) passa, a distribuição está honesta — não é acerto garantido, é probabilidade auditada. Estas métricas são do horizonte de <b>1 dia</b> (onde há amostra); a densidade servida em horizontes mais longos é a Student-t crua — a recalibração de 1 dia não transfere.
         </p>
       </div>
 

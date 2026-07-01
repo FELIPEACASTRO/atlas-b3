@@ -553,7 +553,7 @@ def build_decision(
         sizing = _kelly_lots(card=s, capital=capital, perfil=perfil,
                              size_conf=conf["size_confidence"], gate=conf["gate_backtest"])
         if is_abstained:
-            sizing = {**sizing, "lots": 0, "reason": hard}
+            sizing = {"lots": 0, "kelly_frac": 0.0, "reason": hard}   # dict limpo (sem metadados pré-abstenção)
         stance = 1 if s.get("vol_stance") == "vender" else -1
         aligned = signals["consensus"] == 0 or stance == signals["consensus"]
         card_score = round(conf["score"] * (1.0 if aligned else 0.6) * (1.0 if s["thesis"] == want else 0.85), 1)
@@ -567,7 +567,7 @@ def build_decision(
                           "max_loss_lot": s["per_lot"]["max_loss"], "max_gain_lot": s["per_lot"]["max_gain"]},
             "why": _why(card=s, mvp=mvp, signals=signals, conf=conf, verdict=verdict),
             "invalidation": _invalidation(dens=dens, spot=spot, quantiles=dist["quantiles"],
-                                          mvp=mvp, vol_stance=s.get("vol_stance")),
+                                          mvp=mvp, vol_stance=s.get("vol_stance"), thesis=s["thesis"]),
         })
     cards.sort(key=lambda c: (c["verdict"] not in ("EVITAR", "OBSERVAR"), c["decision_score"]), reverse=True)
     return {

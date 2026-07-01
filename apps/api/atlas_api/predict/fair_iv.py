@@ -3,7 +3,7 @@
 O Edge Map fala em probabilidade e o pricing kernel em preço de estado; o operador de opções
 pensa em VOL. Aqui o mesmo prêmio aparece na língua dele: para cada strike, a IV que o mercado
 cobra (da smile SVI) vs a IV "justa" pela nossa vol física — o gap é o VRP decomposto por strike,
-em pontos de vol, e aponta o strike de maior oportunidade.
+em pontos de vol, decompondo em nível (VRP near-the-money) + prêmio de skew.
 
 Honestidade: a nossa densidade física é SIMÉTRICA (Student-t, drift=0 declarado — não modelamos
 skew físico), então a linha justa é ~plana na vol física. Logo, o SKEW do gap embute o prêmio de
@@ -24,7 +24,8 @@ def fair_iv_smile(*, spot: float, forward: float, phys_vol: float, svi_params, T
     """Para cada moneyness: IV de mercado (SVI) vs IV justa (vol física) e o gap em vol points.
 
     ``phys_vol`` é a vol física anualizada (E[RV], sem κ — κ é largura da densidade, não nível).
-    Retorna ``{smile, max_gap}`` onde ``max_gap`` é o strike de maior |gap| (oportunidade).
+    Retorna ``{smile, level_gap, skew_premium, put_wing_strike}``: ``level_gap`` = VRP near-the-money
+    (a leitura limpa), ``skew_premium`` = excesso da asa de put além do nível (skew de mercado).
     """
     if spot <= 0 or forward <= 0 or T <= 0:
         raise ValueError("spot/forward/T must be > 0")
