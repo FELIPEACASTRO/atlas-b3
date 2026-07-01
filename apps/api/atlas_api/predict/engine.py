@@ -16,6 +16,14 @@ from atlas_api.pricing.signal import iv_rank
 
 from .calibrate import IsotonicRecalibrator, online_recalibrator
 from .distribution import Density, physical_density
+from .decision import (
+    _asset_signals,
+    _confidence,
+    _invalidation,
+    _kelly_lots,
+    _verdict,
+    _why,
+)
 from .edge import premium_map
 from .edge_backtest import run_edge_backtest, vol_premium_pnl
 from .fair_iv import fair_iv_smile
@@ -488,6 +496,90 @@ def build_calibration_health(
         "last_break_days_ago": (len(series) - 1 - last_end) if last_end is not None else None,
         "note": f"p-valor rolante do PIT (janela {window}d, KS de baixa potência); janelas sobrepostas "
                 "agrupadas em episódios: <0.05 = densidade perdeu o regime — análise, não recomendação",
+    }
+
+
+def build_decision(
+    *, ticker: str, ohlc: list[tuple], closes: list[float], iv_history: list[float],
+    spot: float, chain: list[dict], asof: str | None, visao: str = "alta",
+    capital: float = 20000.0, prazo: int = 30, perfil: str = "moderado",
+    backtest_dsr: float | None = None,
+) -> dict:
+    """CAMADA DE DECISÃO: sintetiza todos os sinais num Cartão de Decisão por estrutura.
+
+    O quê (estrutura) + por quê (concordância dos sinais) + quanto (Kelly+CVaR sob incerteza) + com
+    que confiança (score de 5 fatores). Sabe se abster (PIT quebrado / smile ruim). Compõe os
+    build_* já validados; não duplica lógica. Análise, nunca ordem.
+    """
+    prov = f"COTAHIST EOD {asof}" if asof else "COTAHIST EOD"
+    perfil = perfil if perfil in ("conservador", "moderado", "agressivo") else "moderado"
+    base = {"ticker": ticker, "spot": round(spot, 2) if spot else None, "provenance": prov, "asof": asof,
+            "visao": visao, "capital": capital, "prazo": prazo, "perfil": perfil}
+    pred = build_prediction(ticker=ticker, ohlc=ohlc, closes=closes, iv_history=iv_history,
+                            spot=spot, chain=chain, asof=asof, T_days=prazo)
+    if pred["sigma"] is None or spot is None or spot <= 0:
+        return {**base, "available": False, "abstain": {"is_abstained": True, "reason": "histórico insuficiente"},
+                "cards": [], "note": "sem dado suficiente para uma decisão honesta"}
+    mvp, cal, reg, dist = (pred["market_vs_physical"], pred["calibration"], pred["regime"], pred["dist"])
+    smile = mvp.get("market_smile")
+    health = build_calibration_health(ticker=ticker, ohlc=ohlc, closes=closes, asof=asof)
+    physical = mvp["physical"]
+    dens = physical_density(spot=spot, sigma_iv=physical, rv=physical, vrp=0.0, T=prazo / 365.0)
+    fit_smile = _fit_smile_near(chain, spot, asof, prazo)
+    signals = _asset_signals(spot=spot, chain=chain, asof=asof, prazo=prazo, dens=dens, mvp=mvp,
+                             regime=reg, fit_smile=fit_smile)
+    # confiança da smile pela MESMA fonte dos sinais (_fit_smile_near, o fit rico), não o ponto ATM
+    smile_conf = fit_smile[0] if fit_smile[0] is not None else smile
+    conf = _confidence(cal=cal, health=health, smile=smile_conf, backtest_dsr=backtest_dsr,
+                       agree_frac=signals["agree_frac"])
+    # abstenção (gate duro): sem calibração ou densidade descalibrada HOJE → não opere
+    hard = None
+    if not cal.get("available"):
+        hard = "sem histórico para uma densidade honesta"
+    elif health.get("available") and not health.get("calibrated_now"):
+        hard = "a densidade perdeu o regime hoje (PIT quebrado) — POP/EV não confiáveis agora"
+    is_abstained = hard is not None
+    # catálogo de estruturas (mesma base do consultor)
+    opts = _expiry_options(chain, asof, prazo)
+    cat = build_catalog(spot, dens, opts, visao=visao, capital=capital) if opts else []
+    for s in cat:
+        s["rationale"] = rationale(s, market_iv=mvp.get("iv"), physical=mvp.get("physical"))
+    want = "neutro" if visao == "renda" else visao
+    # não recomendar estruturas que CONTRADIZEM a visão do usuário (alta↔baixa); mantém a tese + neutras
+    if want in ("alta", "baixa"):
+        cat = [s for s in cat if s["thesis"] in (want, "neutro")]
+    cards: list[dict] = []
+    for s in cat:
+        sizing = _kelly_lots(card=s, capital=capital, perfil=perfil,
+                             size_conf=conf["size_confidence"], gate=conf["gate_backtest"])
+        if is_abstained:
+            sizing = {**sizing, "lots": 0, "reason": hard}
+        stance = 1 if s.get("vol_stance") == "vender" else -1
+        aligned = signals["consensus"] == 0 or stance == signals["consensus"]
+        card_score = round(conf["score"] * (1.0 if aligned else 0.6) * (1.0 if s["thesis"] == want else 0.85), 1)
+        verdict = _verdict(card_score, sizing["lots"], is_abstained)
+        cards.append({
+            "name": s["name"], "thesis": s["thesis"], "defined_risk": s["defined_risk"],
+            "vol_stance": s.get("vol_stance"), "legs": s["legs"], "breakevens": s["breakevens"],
+            "verdict": verdict, "decision_score": card_score,
+            "sizing": sizing,
+            "economics": {"pop": s["pop"], "ev_lot": s["per_lot"]["ev"], "cvar_lot": s["per_lot"]["cvar"],
+                          "max_loss_lot": s["per_lot"]["max_loss"], "max_gain_lot": s["per_lot"]["max_gain"]},
+            "why": _why(card=s, mvp=mvp, signals=signals, conf=conf, verdict=verdict),
+            "invalidation": _invalidation(dens=dens, spot=spot, quantiles=dist["quantiles"],
+                                          mvp=mvp, vol_stance=s.get("vol_stance")),
+        })
+    cards.sort(key=lambda c: (c["verdict"] not in ("EVITAR", "OBSERVAR"), c["decision_score"]), reverse=True)
+    return {
+        **base, "available": True,
+        "confidence": conf,
+        "abstain": {"is_abstained": is_abstained, "reason": hard},
+        "signals": signals,
+        "market_view": {"iv": mvp.get("iv"), "physical": mvp.get("physical"), "vrp": mvp.get("vrp"),
+                        "regime": reg.get("regime"), "bias": reg.get("bias"), "iv_rank": reg.get("iv_rank")},
+        "cards": cards,
+        "liquidez_caveat": "sizing por risco/confiança; a liquidez real da opção (volume/OI) não está na base EOD — confira antes de executar",
+        "note": "cartão de decisão: síntese dos sinais em o quê/por quê/quanto/confiança — análise, nunca ordem",
     }
 
 

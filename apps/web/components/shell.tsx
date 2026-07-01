@@ -8,6 +8,7 @@ import {
   Briefcase,
   UserSearch,
   Target,
+  Gauge,
   MessageSquare,
   Search,
 } from "lucide-react";
@@ -22,6 +23,7 @@ const modules = [
   { icon: Briefcase, label: "Carteira", href: "/carteira" },
   { icon: UserSearch, label: "Analista", href: "/analista" },
   { icon: Target, label: "Estratégias", href: "/estrategias" },
+  { icon: Gauge, label: "Decisão", href: "/decisao" },
   { icon: MessageSquare, label: "Chat", href: "/chat" },
 ];
 

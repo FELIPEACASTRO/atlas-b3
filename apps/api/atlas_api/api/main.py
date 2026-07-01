@@ -51,6 +51,7 @@ from atlas_api.pricing.rv import realized_vol
 from atlas_api.pricing.signal import iv_rank
 from atlas_api.predict.engine import (
     build_calibration_health,
+    build_decision,
     build_edge_backtest,
     build_edge_map,
     build_fair_iv,
@@ -460,6 +461,38 @@ def edge_backtest(ticker: str) -> dict:
     asof = store.get_meta(conn, "asof")
     conn.close()
     return build_edge_backtest(ticker=ticker, universe=universe, asof=asof)
+
+
+@app.get("/decision/{ticker}")
+def decision(ticker: str, visao: str = "alta", capital: float = 20000.0,
+             prazo: int = 30, perfil: str = "moderado") -> dict:
+    """Cartão de Decisão: a síntese que vira decisão — o quê, por quê, quanto, com que confiança.
+
+    Sintetiza todos os sinais do motor num veredicto por estrutura, com sizing Kelly+CVaR sob
+    incerteza e abstenção honesta (não opera quando a densidade perdeu o regime). Análise, nunca ordem.
+    """
+    ticker = ticker.upper()
+    conn = _require_conn()
+    inst = store.get_instrument(conn, ticker)
+    spot = inst.get("ultimo") if inst else None
+    ohlc = store.price_history(conn, ticker, limit=400)
+    iv_hist = store.iv_history(conn, ticker, limit=400)
+    chain = store.query_chain(conn, ticker, limit=5000)
+    asof = store.get_meta(conn, "asof")
+    # gate econômico (deflated Sharpe do universo) — o mesmo p/ todos; alimenta a confiança da decisão
+    universe: list[dict] = []
+    for nm in dict.fromkeys([ticker, *_BACKTEST_UNIVERSE]):
+        o = store.price_history(conn, nm, limit=400)
+        iv = store.iv_history(conn, nm, limit=400)
+        if o and iv:
+            universe.append({"ticker": nm, "ohlc": o, "closes": [b[3] for b in o], "iv_history": iv})
+    conn.close()
+    bt = build_edge_backtest(ticker=ticker, universe=universe, asof=asof)
+    dsr = bt.get("deflated_sharpe") if bt.get("available") else None
+    closes = [bar[3] for bar in ohlc]
+    return build_decision(ticker=ticker, ohlc=ohlc, closes=closes, iv_history=iv_hist, spot=spot,
+                          chain=chain, asof=asof, visao=visao, capital=capital, prazo=prazo,
+                          perfil=perfil, backtest_dsr=dsr)
 
 
 @app.get("/option/{ticker}", response_model=OptionAnalysisOut)
