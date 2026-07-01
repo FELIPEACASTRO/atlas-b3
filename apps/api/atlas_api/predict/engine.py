@@ -122,22 +122,17 @@ def _recal_quantile(dens: Density, q: float, recal: IsotonicRecalibrator | None)
     return float(dens.spot * math.exp(float(dens.logret_ppf(level))))
 
 
-def _calibration(rv: list[float], closes: list[float], *, min_train: int = 26, alpha: float = 0.2):
-    """Backtest HONESTO da densidade servida + recalibração isotônica ONLINE.
+def _walk_forward_pit(rv: list[float], closes: list[float], *, min_train: int = 26, alpha: float = 0.2):
+    """PIT out-of-sample dia-a-dia (point-in-time) + cobertura do intervalo (1−α).
 
-    Para cada dia out-of-sample (point-in-time): prevê a vol (HAR), monta a densidade física
-    de 1 dia, registra o PIT da CDF e se o retorno cai no intervalo nominal. Depois recalibra
-    a forma com janela rolante (medido no dado real: rolante conserta, estático piora). Retorna
-    ``(métricas, recalibrador_para_servir | None)``. Série curta → recusa, nunca fabrica.
+    Para cada dia: prevê a vol 1-passo (HAR, sem look-ahead), monta a densidade física de 1 dia,
+    registra o PIT da CDF e se o retorno caiu no intervalo nominal. Base compartilhada do gate de
+    calibração e do monitor de descalibração (PIT-break). Retorna ``(pit_vals, covered)``.
     """
-    nominal = round(1.0 - alpha, 3)
-    n = len(rv)
-    if n < min_train + 20:
-        return {"available": False, "reason": "série curta para backtest robusto", "nominal": nominal}, None
     q_lo, q_hi = alpha / 2.0, 1.0 - alpha / 2.0
     pit_vals: list[float] = []
     covered: list[bool] = []
-    for i in range(min_train, n):
+    for i in range(min_train, len(rv)):
         day = i + YZ_WINDOW - 1                 # índice em closes alinhado a rv[i] (fim da janela YZ)
         if day + 1 >= len(closes):
             break
@@ -148,6 +143,22 @@ def _calibration(rv: list[float], closes: list[float], *, min_train: int = 26, a
         realized = math.log(closes[day + 1] / closes[day])
         pit_vals.append(float(dens.logret_cdf(realized)))
         covered.append(bool(dens.logret_ppf(q_lo) <= realized <= dens.logret_ppf(q_hi)))
+    return pit_vals, covered
+
+
+def _calibration(rv: list[float], closes: list[float], *, min_train: int = 26, alpha: float = 0.2):
+    """Backtest HONESTO da densidade servida + recalibração isotônica ONLINE.
+
+    Roda o walk-forward do PIT (``_walk_forward_pit``) e recalibra a forma com janela rolante
+    (medido no dado real: rolante conserta, estático piora). Retorna ``(métricas,
+    recalibrador_para_servir | None)``. Série curta → recusa, nunca fabrica.
+    """
+    nominal = round(1.0 - alpha, 3)
+    n = len(rv)
+    if n < min_train + 20:
+        return {"available": False, "reason": "série curta para backtest robusto", "nominal": nominal}, None
+    q_lo, q_hi = alpha / 2.0, 1.0 - alpha / 2.0
+    pit_vals, covered = _walk_forward_pit(rv, closes, min_train=min_train, alpha=alpha)
     if len(pit_vals) < 20:
         return {"available": False, "reason": "poucos pontos out-of-sample", "nominal": nominal}, None
     pit_arr = np.asarray(pit_vals, dtype=float)
@@ -435,4 +446,35 @@ def build_fair_iv(
         **base, "dte": dte, "market_vs_physical": pred["market_vs_physical"], "regime": pred["regime"],
         **fv,
         "note": "smile de mercado vs vol física justa (VRP por strike, em vol points) — análise, não recomendação",
+    }
+
+
+def build_calibration_health(
+    *, ticker: str, ohlc: list[tuple], closes: list[float], asof: str | None,
+    window: int = 40, min_train: int = 26,
+) -> dict:
+    """MONITOR DE DESCALIBRAÇÃO (PIT-break): a saúde da densidade ao longo do tempo.
+
+    O PIT out-of-sample já é calculado dia-a-dia; aqui ele NÃO é descartado — vira uma série
+    rolante do p-valor de uniformidade. Quando cai sob 0.05 o modelo perdeu o regime: a densidade
+    servida é uma mentira estatística naquele momento. Damos a saúde atual e há quantos pregões foi
+    a última quebra. Honestidade auditada virando sinal — o oposto do POP que nunca admite erro.
+    """
+    prov = f"COTAHIST EOD {asof}" if asof else "COTAHIST EOD"
+    base = {"ticker": ticker, "provenance": prov, "asof": asof, "window": window}
+    rv = rv_series(ohlc, window=YZ_WINDOW)
+    pit, _ = _walk_forward_pit(rv, closes, min_train=min_train)
+    if len(pit) < window + 5:
+        return {**base, "available": False,
+                "note": "histórico curto para monitorar a calibração ao longo do tempo"}
+    parr = np.asarray(pit, dtype=float)
+    series = [round(float(pit_uniformity(parr[t - window:t])), 3) for t in range(window, len(parr) + 1)]
+    below = [i for i, p in enumerate(series) if p < 0.05]
+    current = series[-1]
+    return {
+        **base, "available": True, "n": len(series), "series": series,   # mais recente = fim
+        "current_p": current, "calibrated_now": bool(current >= 0.05),
+        "ever_broke": bool(below),
+        "last_break_days_ago": (len(series) - 1 - below[-1]) if below else None,
+        "note": f"p-valor rolante do PIT (janela {window}d): <0.05 = densidade perdeu o regime — análise, não recomendação",
     }

@@ -50,6 +50,7 @@ from atlas_api.pricing.risk import SPOT_SHOCKS, payoff_at_expiry, payoff_grid, s
 from atlas_api.pricing.rv import realized_vol
 from atlas_api.pricing.signal import iv_rank
 from atlas_api.predict.engine import (
+    build_calibration_health,
     build_edge_map,
     build_fair_iv,
     build_prediction,
@@ -415,6 +416,22 @@ def fair_iv(ticker: str, horizon: int = 30) -> dict:
     closes = [bar[3] for bar in ohlc]
     return build_fair_iv(ticker=ticker, ohlc=ohlc, closes=closes, iv_history=iv_hist,
                          spot=spot, chain=chain, asof=asof, T_days=horizon)
+
+
+@app.get("/calibration-health/{ticker}")
+def calibration_health(ticker: str) -> dict:
+    """Monitor de descalibração (PIT-break): a densidade ainda está confiável HOJE, e desde quando.
+
+    Série rolante do p-valor do PIT — quando cai sob 0.05, o modelo perdeu o regime. Honestidade
+    auditada como sinal: dá a saúde atual e há quantos pregões foi a última quebra.
+    """
+    ticker = ticker.upper()
+    conn = _require_conn()
+    ohlc = store.price_history(conn, ticker, limit=400)
+    asof = store.get_meta(conn, "asof")
+    conn.close()
+    closes = [bar[3] for bar in ohlc]
+    return build_calibration_health(ticker=ticker, ohlc=ohlc, closes=closes, asof=asof)
 
 
 @app.get("/option/{ticker}", response_model=OptionAnalysisOut)

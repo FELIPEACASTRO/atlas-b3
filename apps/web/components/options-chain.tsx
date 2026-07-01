@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { VolHistory } from "@/components/vol-history";
 import { CalibrationPanel } from "@/components/calibration-panel";
+import { CalibrationHealth } from "@/components/calibration-health";
 import { EdgeMap } from "@/components/edge-map";
 import { KernelMap } from "@/components/kernel-map";
 import { FairIv } from "@/components/fair-iv";
@@ -115,6 +116,7 @@ export function OptionsChain() {
 
       <VolHistory ticker={ticker} />
       <CalibrationPanel ticker={ticker} />
+      <CalibrationHealth ticker={ticker} />
       <EdgeMap ticker={ticker} />
       <KernelMap ticker={ticker} />
       <FairIv ticker={ticker} />
