@@ -17,6 +17,7 @@ from atlas_api.pricing.signal import iv_rank
 from .calibrate import IsotonicRecalibrator, online_recalibrator
 from .distribution import Density, physical_density
 from .edge import premium_map
+from .kernel import kernel_shape, pricing_kernel
 from .forecast import har_leverage, vol_ensemble
 from .regime import regime, strategy_bias
 from .series import neg_return_series, rv_series
@@ -371,4 +372,36 @@ def build_edge_map(
         "market_vs_physical": pred["market_vs_physical"], "regime": pred["regime"],
         "edge": emap,
         "note": "prêmio físico-vs-risco-neutro por strike (isola vol/skew) — análise, não recomendação",
+    }
+
+
+def build_pricing_kernel(
+    *, ticker: str, ohlc: list[tuple], closes: list[float], iv_history: list[float],
+    spot: float, chain: list[dict], asof: str | None, T_days: int = 30,
+) -> dict:
+    """PRICING KERNEL empírico (SDF): ``M(S)=q(S)/p(S)`` — a razão risco-neutra/física por preço.
+
+    A forma teoricamente correta do Edge Map: razão de densidades (não diferença de CDFs). Só o
+    ATLAS consegue (exige a densidade física calibrada). ``slope<0`` = aversão a risco padrão;
+    ``puzzle=True`` = M sobe na cauda (Rosenberg-Engle). Recusa honesto se a smile não é confiável.
+    """
+    prov = f"COTAHIST EOD {asof}" if asof else "COTAHIST EOD"
+    base = {"ticker": ticker, "spot": round(spot, 2) if spot else None, "provenance": prov, "asof": asof}
+    pred = build_prediction(ticker=ticker, ohlc=ohlc, closes=closes, iv_history=iv_history,
+                            spot=spot, chain=chain, asof=asof, T_days=T_days)
+    if pred["sigma"] is None or spot is None or spot <= 0:
+        return {**base, "kernel": None, "note": "histórico insuficiente para o pricing kernel"}
+    fit, dte = _fit_smile_near(chain, spot, asof, T_days)
+    if fit is None:
+        return {**base, "kernel": None, "market_vs_physical": pred["market_vs_physical"],
+                "note": "smile de mercado não confiável (sem arbitragem-livre) — pricing kernel omitido"}
+    physical = pred["market_vs_physical"]["physical"]
+    dens = physical_density(spot=spot, sigma_iv=physical, rv=physical, vrp=0.0, T=dte / 365.0)
+    grid = [round(float(x), 4) for x in np.linspace(0.85, 1.15, 25)]
+    kern = pricing_kernel(spot=spot, forward=fit["forward"], phys_pdf=dens.logret_pdf,
+                          svi_k=fit["k"], svi_density=fit["density"], moneyness=grid)
+    return {
+        **base, "dte": dte, "market_vs_physical": pred["market_vs_physical"], "regime": pred["regime"],
+        "kernel": kern, "shape": kernel_shape(kern),
+        "note": "razão densidade risco-neutra / física = pricing kernel (SDF) empírico — análise, não recomendação",
     }
