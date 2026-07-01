@@ -16,6 +16,7 @@ from atlas_api.pricing.signal import iv_rank
 
 from .calibrate import IsotonicRecalibrator, online_recalibrator
 from .distribution import Density, physical_density
+from .edge import premium_map
 from .forecast import har_leverage, vol_ensemble
 from .regime import regime, strategy_bias
 from .series import neg_return_series, rv_series
@@ -294,4 +295,72 @@ def build_strategies(
         "strategies": cat[:8],
         "note": "análise probabilística (POP + valor esperado sobre a densidade), não recomendação de compra/venda",
         "liquidez_caveat": "sizing por risco; a liquidez real da opção (volume/contratos em aberto) NÃO está na base EOD — confira antes de executar",
+    }
+
+
+def _fit_smile_near(chain: list[dict], spot: float, asof: str | None, target_days: int):
+    """Ajusta a smile SVI no vencimento RICO mais próximo de ``target_days``; retorna (fit, dte) ou (None, None)."""
+    if not chain or not asof or spot is None or spot <= 0:
+        return None, None
+    try:
+        a = datetime.date.fromisoformat(asof)
+    except (ValueError, TypeError):
+        return None, None
+    by_venc: dict[str, list[dict]] = {}
+    for o in chain:
+        if o.get("venc") and o.get("iv") is not None and o.get("strike") is not None:
+            by_venc.setdefault(o["venc"], []).append(o)
+    dated = []
+    for venc, opts in by_venc.items():
+        try:
+            dte = (datetime.date.fromisoformat(venc) - a).days
+        except ValueError:
+            continue
+        if dte > 0:
+            dated.append((dte, opts))
+    rich = [(dte, opts) for dte, opts in dated if len(opts) >= 20]
+    pool = rich if rich else [(dte, opts) for dte, opts in dated if len(opts) >= 6]
+    if not pool:
+        return None, None
+    dte, opts = min(pool, key=lambda do: abs(do[0] - target_days))
+    fit = fit_market_smile([o["strike"] for o in opts], [o["iv"] for o in opts], spot=spot, T=dte / 365.0)
+    return (fit if fit and fit["usable"] else None), dte
+
+
+def build_edge_map(
+    *, ticker: str, ohlc: list[tuple], closes: list[float], iv_history: list[float],
+    spot: float, chain: list[dict], asof: str | None, T_days: int = 30,
+) -> dict:
+    """MAPA DE PRÊMIO (o diferencial): P_mercado(S≤K) (RN/SVI) vs P_física(S≤K) (calibrada), por strike.
+
+    Só quando a smile é confiável (arb-free + RMSE baixo) — senão recusa honesto. Ambas no forward
+    (isola vol/skew, remove o carry). ``edge>0`` = put rica; ``edge<0`` = call rica.
+    """
+    prov = f"COTAHIST EOD {asof}" if asof else "COTAHIST EOD"
+    base = {"ticker": ticker, "spot": round(spot, 2) if spot else None, "provenance": prov, "asof": asof}
+    pred = build_prediction(ticker=ticker, ohlc=ohlc, closes=closes, iv_history=iv_history,
+                            spot=spot, chain=chain, asof=asof, T_days=T_days)
+    if pred["sigma"] is None or spot is None or spot <= 0:
+        return {**base, "edge": None, "note": "histórico insuficiente para o mapa de prêmio"}
+    fit, dte = _fit_smile_near(chain, spot, asof, T_days)
+    if fit is None:
+        return {**base, "edge": None, "market_vs_physical": pred["market_vs_physical"],
+                "note": "smile de mercado não confiável (sem arbitragem-livre) — mapa de prêmio omitido"}
+    physical = pred["market_vs_physical"]["physical"]
+    rv = rv_series(ohlc, window=YZ_WINDOW)
+    _, r_serve = _calibration(rv, closes)
+    dens = physical_density(spot=spot, sigma_iv=physical, rv=physical, vrp=0.0, T=dte / 365.0)
+
+    def phys_cdf(x):
+        c = float(dens.logret_cdf(x))
+        return float(r_serve.apply(c)) if r_serve is not None else c
+
+    grid = [round(x, 3) for x in np.linspace(0.85, 1.15, 13)]
+    emap = premium_map(spot=spot, forward=fit["forward"], phys_cdf=phys_cdf,
+                       svi_k=fit["k"], svi_density=fit["density"], moneyness=grid)
+    return {
+        **base, "dte": dte, "recalibrated": r_serve is not None,
+        "market_vs_physical": pred["market_vs_physical"], "regime": pred["regime"],
+        "edge": emap,
+        "note": "prêmio físico-vs-risco-neutro por strike (isola vol/skew) — análise, não recomendação",
     }

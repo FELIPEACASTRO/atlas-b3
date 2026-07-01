@@ -72,6 +72,21 @@ def test_strategies_without_store_returns_503(monkeypatch):
     assert client.get("/strategies/PETR4").status_code == 503
 
 
+def test_edge_without_store_returns_503(monkeypatch):
+    monkeypatch.delenv("ATLAS_DB", raising=False)
+    assert client.get("/edge/PETR4").status_code == 503
+
+
+def test_edge_from_real_store_is_honest_with_thin_chain(tmp_path, monkeypatch):
+    db = str(tmp_path / "e.db")
+    _seed_predict_store(db, n=60)                             # cadeia fina → smile não confiável
+    monkeypatch.setenv("ATLAS_DB", db)
+    d = client.get("/edge/PETR4").json()
+    assert d["ticker"] == "PETR4"
+    assert d["edge"] is None                                 # sem smile confiável → recusa honesta
+    assert "não recomendação" in d["note"] or "omitido" in d["note"] or "insuficiente" in d["note"]
+
+
 def test_strategies_from_real_store(tmp_path, monkeypatch):
     db = str(tmp_path / "s.db")
     _seed_predict_store(db, n=60)
