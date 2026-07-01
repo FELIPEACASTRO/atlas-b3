@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
+
 from .ssvi import svi_total_variance
 
 
@@ -38,5 +40,16 @@ def fair_iv_smile(*, spot: float, forward: float, phys_vol: float, svi_params, T
             "gap": round(mkt - phys_vol, 4),               # >0: mercado cobra prêmio de vol aqui
         })
     smile.sort(key=lambda r: r["strike"])
-    top = max(smile, key=lambda r: abs(r["gap"]))
-    return {"smile": smile, "max_gap": top}
+    # Decomposição HONESTA (não reportar max|gap|, que é SEMPRE a put mais funda por causa do skew):
+    #  - level_gap = leitura de NÍVEL (VRP) perto do dinheiro (|mny−1|≤0.05) — o gap "limpo".
+    #  - skew_premium = quanto a asa de put excede o nível — componente de SKEW de mercado (não VRP puro;
+    #    a nossa física é simétrica, então isto embute skew físico real que não modelamos).
+    ntm = [r for r in smile if abs(r["moneyness"] - 1.0) <= 0.05]
+    level_gap = float(np.mean([r["gap"] for r in ntm])) if ntm else smile[len(smile) // 2]["gap"]
+    put_wing = min(smile, key=lambda r: r["moneyness"])
+    return {
+        "smile": smile,
+        "level_gap": round(level_gap, 4),                  # VRP de nível (near-the-money)
+        "skew_premium": round(put_wing["gap"] - level_gap, 4),   # extra da asa de put além do nível
+        "put_wing_strike": put_wing["strike"],
+    }

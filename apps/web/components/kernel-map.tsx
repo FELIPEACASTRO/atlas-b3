@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 type Pt = { moneyness: number; strike: number; m: number };
-type Shape = { slope: number; puzzle: boolean; m_min: number; m_max: number };
+type Shape = { slope: number; slope_r2: number; risk_aversion_reliable: boolean; puzzle: boolean; m_min: number; m_max: number; m_min_moneyness: number };
 type Resp = {
   ticker: string;
   spot: number | null;
@@ -63,7 +63,7 @@ export function KernelMap({ ticker }: { ticker: string }) {
   return wrap(
     <>
       <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-[var(--text-tertiary)]">
-        <span>inclinação <b className="mono" style={{ color: sh.slope < 0 ? "var(--up)" : "var(--down)" }}>{sh.slope > 0 ? "+" : ""}{sh.slope}</b> <span className="text-[10px]">({sh.slope < 0 ? "aversão a risco padrão" : "anômala"})</span></span>
+        <span>inclinação <b className="mono">{sh.slope > 0 ? "+" : ""}{sh.slope}</b> <span className="text-[10px]">(R² {sh.slope_r2}; {sh.risk_aversion_reliable ? (sh.slope < 0 ? "aversão a risco" : "anômala") : "forma em U/corcova — fit linear fraco"})</span></span>
         {sh.puzzle ? <span className="rounded px-1.5 py-0.5 text-[10px]" style={{ background: "color-mix(in oklch, var(--down) 16%, transparent)", color: "var(--down)" }}>pricing-kernel puzzle (U)</span> : null}
         {d.dte ? <span>· horizonte {d.dte}d</span> : null}
       </div>

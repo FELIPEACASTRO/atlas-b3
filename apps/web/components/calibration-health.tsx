@@ -11,6 +11,7 @@ type Resp = {
   current_p?: number;
   calibrated_now?: boolean;
   ever_broke?: boolean;
+  n_breaks?: number;
   last_break_days_ago?: number | null;
   note?: string;
 };
@@ -68,8 +69,8 @@ export function CalibrationHealth({ ticker }: { ticker: string }) {
           {d.last_break_days_ago == null
             ? "sem quebras no histórico"
             : d.last_break_days_ago === 0
-              ? "quebrou hoje"
-              : <>última quebra: <b className="mono" style={{ color: "var(--text-secondary)" }}>{d.last_break_days_ago}</b> pregões atrás</>}
+              ? <>quebra em curso · {d.n_breaks} episódio{d.n_breaks === 1 ? "" : "s"} no histórico</>
+              : <>{d.n_breaks} episódio{d.n_breaks === 1 ? "" : "s"} · última há <b className="mono" style={{ color: "var(--text-secondary)" }}>{d.last_break_days_ago}</b> pregões</>}
         </span>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: "auto" }} role="img" aria-label={`Saúde da calibração de ${ticker}`}>

@@ -45,13 +45,29 @@ def pricing_kernel(
 
 
 def kernel_shape(kernel: list[dict]) -> dict:
-    """Resumo do SDF: inclinação (aversão a risco) e se é não-monotônico (o puzzle)."""
+    """Resumo do SDF: inclinação (com R² — só é 'aversão a risco' se o ajuste linear presta) e o
+    pricing-kernel puzzle (Rosenberg-Engle) — que exige revés na cauda DIREITA, não skew de put.
+
+    Correções de rigor: (1) o kernel é U/corcova; um fit LINEAR explica pouco (R² baixo), então o
+    sinal do slope só é lido como aversão a risco quando R²≥0.5. (2) o puzzle é revés na cauda de
+    ALTA — o mínimo deve ser interior E near-the-money, senão o M alto na cauda esquerda (puts de
+    crash = skew normal) dispararia um falso puzzle.
+    """
     u = np.array([math.log(r["moneyness"]) for r in kernel])
     m = np.array([r["m"] for r in kernel], dtype=float)
-    slope = float(np.polyfit(u, m, 1)[0])                     # dM/d(logS): <0 = aversão a risco padrão
+    mny = np.array([r["moneyness"] for r in kernel], dtype=float)
+    slope, intercept = (float(v) for v in np.polyfit(u, m, 1))
+    ss_res = float(np.sum((m - (slope * u + intercept)) ** 2))
+    ss_tot = float(np.sum((m - m.mean()) ** 2)) + 1e-12
+    r2 = 1.0 - ss_res / ss_tot
     i_min = int(np.argmin(m))
     span = float(m.max() - m.min()) + 1e-9
-    # puzzle: mínimo INTERIOR e M sobe de novo na cauda direita (≥5% do range) — U-shape
-    puzzle = bool(0 < i_min < len(m) - 1 and (m[-1] - m[i_min]) > 0.05 * span)
-    return {"slope": round(slope, 3), "puzzle": puzzle,
-            "m_min": round(float(m.min()), 3), "m_max": round(float(m.max()), 3)}
+    min_ntm = bool(0.90 <= mny[i_min] <= 1.10)               # mínimo perto do dinheiro
+    right_reversal = bool(i_min < len(m) - 1 and (m[-1] - m[i_min]) > 0.10 * span)   # sobe na cauda DIREITA
+    return {
+        "slope": round(slope, 3), "slope_r2": round(r2, 2),
+        "risk_aversion_reliable": bool(r2 >= 0.5),           # só então o slope<0 vira "aversão a risco"
+        "puzzle": bool(min_ntm and right_reversal),
+        "m_min": round(float(m.min()), 3), "m_max": round(float(m.max()), 3),
+        "m_min_moneyness": round(float(mny[i_min]), 3),
+    }

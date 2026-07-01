@@ -470,14 +470,24 @@ def build_calibration_health(
                 "note": "histórico curto para monitorar a calibração ao longo do tempo"}
     parr = np.asarray(pit, dtype=float)
     series = [round(float(pit_uniformity(parr[t - window:t])), 3) for t in range(window, len(parr) + 1)]
-    below = [i for i, p in enumerate(series) if p < 0.05]
     current = series[-1]
+    # Janelas rolantes COMPARTILHAM ~window−1 observações (autocorr ~0.9); contá-las como eventos
+    # independentes engana ("45 quebras" = 1-2 episódios). Agrupa janelas <0.05 CONTÍGUAS num episódio.
+    below = [i for i, p in enumerate(series) if p < 0.05]
+    episodes: list[list[int]] = []
+    for i in below:
+        if episodes and i - episodes[-1][1] <= 1:
+            episodes[-1][1] = i
+        else:
+            episodes.append([i, i])
+    last_end = episodes[-1][1] if episodes else None
     return {
         **base, "available": True, "n": len(series), "series": series,   # mais recente = fim
         "current_p": current, "calibrated_now": bool(current >= 0.05),
-        "ever_broke": bool(below),
-        "last_break_days_ago": (len(series) - 1 - below[-1]) if below else None,
-        "note": f"p-valor rolante do PIT (janela {window}d): <0.05 = densidade perdeu o regime — análise, não recomendação",
+        "ever_broke": bool(episodes), "n_breaks": len(episodes),
+        "last_break_days_ago": (len(series) - 1 - last_end) if last_end is not None else None,
+        "note": f"p-valor rolante do PIT (janela {window}d, KS de baixa potência); janelas sobrepostas "
+                "agrupadas em episódios: <0.05 = densidade perdeu o regime — análise, não recomendação",
     }
 
 

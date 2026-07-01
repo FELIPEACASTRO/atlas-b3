@@ -23,7 +23,7 @@ def test_gap_is_market_minus_physical_vol():
     assert abs(atm["gap"] - (atm["iv_market"] - 0.24)) < 1e-9   # gap = mercado − física
 
 
-def test_max_gap_points_to_biggest_premium():
+def test_decomposes_level_vrp_and_skew():
     T = 30 / 365
     # smile de put-skew: IV maior nas puts (k<0). Constrói variância crescente p/ k negativo.
     ks = [-0.2, -0.1, 0.0, 0.1, 0.2]
@@ -32,6 +32,8 @@ def test_max_gap_points_to_biggest_premium():
     params = fit_svi(ks, w)
     out = fair_iv_smile(spot=100.0, forward=100.0, phys_vol=0.25, svi_params=params, T=T,
                         moneyness=[math.exp(k) for k in ks])
-    # o maior gap deve estar na asa de put (strike mais baixo), onde a IV é maior
-    assert out["max_gap"]["strike"] < 100.0
-    assert out["max_gap"]["gap"] > 0.10                   # ~0.40 − 0.25
+    # NÍVEL (VRP near-the-money) ≈ IV ATM (0.30) − física (0.25) = ~0.05 — a leitura limpa
+    assert 0.02 < out["level_gap"] < 0.08
+    # SKEW: a put funda excede o nível → componente de skew positivo e material, na asa de put
+    assert out["skew_premium"] > 0.05
+    assert out["put_wing_strike"] < 100.0                   # ~0.40 − 0.25

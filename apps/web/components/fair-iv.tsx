@@ -8,7 +8,9 @@ type Resp = {
   spot: number | null;
   dte?: number;
   smile: Pt[] | null;
-  max_gap?: Pt;
+  level_gap?: number;
+  skew_premium?: number;
+  put_wing_strike?: number;
   note?: string;
 };
 
@@ -59,14 +61,14 @@ export function FairIv({ ticker }: { ticker: string }) {
   const gapArea =
     pts.map((p, i) => `${i ? "L" : "M"}${x(p.moneyness).toFixed(1)},${y(p.iv_market).toFixed(1)}`).join(" ") +
     ` L${x(pts[pts.length - 1].moneyness).toFixed(1)},${fairY.toFixed(1)} L${x(pts[0].moneyness).toFixed(1)},${fairY.toFixed(1)} Z`;
-  const mg = d.max_gap;
 
   return wrap(
     <>
       <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-[var(--text-tertiary)]">
         <span className="flex items-center gap-1.5"><i className="inline-block h-1.5 w-3 rounded-full" style={{ background: "var(--accent)" }} /> IV de mercado</span>
         <span className="flex items-center gap-1.5"><i className="inline-block h-1.5 w-3 rounded-full" style={{ background: "var(--text-primary)" }} /> vol física justa {vp(pts[0].iv_fair)}</span>
-        {mg ? <span>· maior prêmio: <b className="mono" style={{ color: "var(--accent)" }}>{(mg.gap * 100).toFixed(1)}pp</b> no strike {mg.strike}</span> : null}
+        {d.level_gap != null ? <span>· VRP de nível <b className="mono" style={{ color: "var(--accent)" }}>{(d.level_gap * 100).toFixed(1)}pp</b></span> : null}
+        {d.skew_premium != null ? <span>· prêmio de skew <b className="mono" style={{ color: "var(--accent)" }}>{(d.skew_premium * 100).toFixed(1)}pp</b> (put)</span> : null}
         {d.dte ? <span>· {d.dte}d</span> : null}
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: "auto" }} role="img" aria-label={`Fair IV de ${ticker}`}>
@@ -84,7 +86,6 @@ export function FairIv({ ticker }: { ticker: string }) {
         <path d={lineMkt} fill="none" stroke="var(--accent)" strokeWidth="1.8" />
         <line x1={x(1)} x2={x(1)} y1={padT} y2={H - padB} stroke="var(--text-tertiary)" strokeWidth="0.6" strokeDasharray="3 3" />
         <text x={x(1)} y={H - padB + 12} textAnchor="middle" fontSize="9" fill="var(--text-tertiary)">spot</text>
-        {mg ? <circle cx={x(mg.moneyness)} cy={y(mg.iv_market)} r="3" fill="var(--accent)" /> : null}
         <text x={padL} y={H - padB + 12} fontSize="9" fill="var(--text-tertiary)">{`${(mnyLo * 100 - 100).toFixed(0)}%`}</text>
         <text x={W - padR} y={H - padB + 12} textAnchor="end" fontSize="9" fill="var(--text-tertiary)">{`+${(mnyHi * 100 - 100).toFixed(0)}%`}</text>
       </svg>

@@ -6,10 +6,12 @@ que está cara" (VRP físico > 0), walk-forward, e passamos pelo Deflated Sharpe
 desconta o multiple-testing sobre o universo. HONESTO: se não sobrevive à deflação (com 1 ano a
 potência é baixa), reportamos isso — como PDV e HARX foram reprovados.
 
-P&L: proxy de PRÊMIO DE VOL diário (não P&L de opção delta-hedgeada): vende vol a ``iv`` e paga a
-vol realizada do dia (``|retorno|·√(π/2)·√252``, estimador não-enviesado de vol via desvio absoluto).
-``premium = iv − realizada``. É o prêmio de variância capturado por dia — o que o vendedor de vol
-embolsa em média. Análise, não recomendação.
+P&L: proxy GROSSEIRO de prêmio de variância diário — NÃO um P&L de vendedor de vol (sem delta-hedge,
+sem gamma/vega path-dependente, sem custos). Vende vol a ``iv`` e paga a vol realizada do dia
+(``|retorno|·√(π/2)·√252``, estimador não-enviesado de vol via desvio absoluto). ``premium = iv −
+realizada``. O Sharpe por-nome anualizado é inflado pelo horizonte (√252 sobre um edge diário) e
+subestima o risco de cauda (um crash aparece como UM dia ruim, não wipeout); por isso a decisão usa o
+PORTFÓLIO deflacionado, não os Sharpes por-nome. Análise, não recomendação.
 """
 from __future__ import annotations
 
@@ -65,47 +67,75 @@ def vol_premium_pnl(iv_history: list[float], rv: list[float], closes: list[float
     return pnl_c, pnl_u
 
 
+def _equal_weight_portfolio(series: list[list[float]]) -> list[float]:
+    """Portfólio equal-weight: média cross-section por dia, alinhada à DIREITA (todos terminam ~asof).
+
+    Concatenar nomes correlacionados (pool) e usar n=Σdias é ANTI-conservador (trata dias
+    correlacionados como independentes → infla o t-stat) e dilui o Sharpe. O objeto negociável e a
+    unidade estatística correta é o portfólio: média diária dos nomes, n = nº de dias do portfólio.
+    """
+    series = [s for s in series if s]
+    if not series:
+        return []
+    maxlen = max(len(s) for s in series)
+    arr = np.full((len(series), maxlen), np.nan)
+    for i, s in enumerate(series):
+        arr[i, maxlen - len(s):] = s                     # alinha à direita: última obs = ~asof
+    with np.errstate(invalid="ignore"):
+        port = np.nanmean(arr, axis=0)
+    return [float(x) for x in port if not math.isnan(x)]
+
+
 def run_edge_backtest(universe: list[dict], *, window: int, min_train: int = 30,
                       min_days: int = 60) -> dict:
     """Backtest gated do sinal VRP sobre um universo. ``universe``: [{ticker, rv, closes, iv_history}].
 
-    Deflated Sharpe sobre o pool, com ``trial_sharpes`` = os Sharpes por nome (deflação de
-    multiple-testing). Verdicto HONESTO: só "confirmado" se sobrevive à deflação (P>0.95).
+    Deflated Sharpe (López de Prado) aplicado ao PORTFÓLIO equal-weight (o objeto negociável), com
+    ``trial_sharpes`` = Sharpes por-observação por nome (deflação de multiple-testing). Verdicto
+    HONESTO em 3 faixas: confirmado (P>0.95), limítrofe (0.5–0.95), não confirmado (<0.5).
     """
     per_name: list[dict] = []
     trial_sharpes: list[float] = []
-    pooled_c: list[float] = []
-    pooled_u: list[float] = []
+    series_c: list[list[float]] = []
+    series_u: list[list[float]] = []
     for u in universe:
         pc, pu = vol_premium_pnl(u["iv_history"], u["rv"], u["closes"], window=window, min_train=min_train)
         if len(pc) < min_days:
             continue
-        sc, su = sharpe(pc), sharpe(pu)                  # anualizados (exibição)
         n_trades = int(sum(1 for x in pc if x != 0.0))
+        traded = [x for x in pc if x != 0.0]             # Sharpe condicional sobre dias NEGOCIADOS (M4b)
         per_name.append({
             "ticker": u["ticker"], "n": len(pc), "trades": n_trades,
-            "sharpe_cond": round(sc, 2), "sharpe_uncond": round(su, 2),
+            "sharpe_cond": round(sharpe(traded), 2), "sharpe_uncond": round(sharpe(pu), 2),
             "total_pnl": round(float(np.sum(pc)), 3),
-            "hit_rate": round(float(np.mean([1.0 if x > 0 else 0.0 for x in pc if x != 0.0]) if n_trades else 0.0), 3),
+            "hit_rate": round(float(np.mean([1.0 if x > 0 else 0.0 for x in traded]) if traded else 0.0), 3),
         })
         trial_sharpes.append(sharpe(pc, annualize=False))  # por observação: casa com o sr interno do gate
-        pooled_c.extend(pc)
-        pooled_u.extend(pu)
-    if len(trial_sharpes) < 2 or len(pooled_c) < min_days:
+        series_c.append(pc)
+        series_u.append(pu)
+    port_c = _equal_weight_portfolio(series_c)
+    port_u = _equal_weight_portfolio(series_u)
+    if len(trial_sharpes) < 2 or len(port_c) < min_days:
         return {"available": False, "note": "universo/histórico insuficiente para o backtest gated"}
-    dsr = deflated_sharpe(pooled_c, trial_sharpes)       # P(Sharpe verdadeiro > 0), deflacionado (unidades casadas)
-    pooled_sh = sharpe(pooled_c)
-    uncond_sh = sharpe(pooled_u)
-    significant = dsr > 0.95
+    dsr = float(deflated_sharpe(port_c, trial_sharpes))  # objeto certo: o portfólio; n = dias do portfólio
+    port_sh, uncond_sh = sharpe(port_c), sharpe(port_u)
+    significant, borderline = dsr > 0.95, 0.5 <= dsr <= 0.95
+    adds_value = port_sh > uncond_sh + 0.10              # margem MATERIAL (não flip na 4ª casa — M4b)
+    verdict = (
+        "CONFIRMADO: o prêmio de VRP sobrevive à deflação de multiple-testing no portfólio"
+        if significant else
+        f"LIMÍTROFE: o prêmio de VRP é quase-significativo no portfólio (deflated Sharpe {dsr:.2f}); "
+        "com ~1 ano a evidência é sugestiva, não conclusiva"
+        if borderline else
+        "NÃO CONFIRMADO: o prêmio não sobrevive à deflação"
+    )
+    if not adds_value:
+        verdict += " — e o condicionamento pela nossa física não agrega valor material vs vender vol sempre (o edge é o VRP em si, não a nossa seleção)"
     return {
-        "available": True, "n_names": len(per_name), "pooled_days": len(pooled_c),
-        "pooled_sharpe_cond": round(pooled_sh, 2), "pooled_sharpe_uncond": round(uncond_sh, 2),
-        "deflated_sharpe": round(float(dsr), 3), "significant": bool(significant),
-        "adds_value_vs_uncond": bool(pooled_sh > uncond_sh),
+        "available": True, "n_names": len(per_name), "portfolio_days": len(port_c),
+        "portfolio_sharpe_cond": round(port_sh, 2), "portfolio_sharpe_uncond": round(uncond_sh, 2),
+        "deflated_sharpe": round(dsr, 3), "significant": bool(significant), "borderline": bool(borderline),
+        "adds_value_vs_uncond": bool(adds_value),
         "per_name": sorted(per_name, key=lambda r: r["sharpe_cond"], reverse=True),
-        "verdict": (
-            "CONFIRMADO: o sinal de VRP físico sobrevive à deflação de multiple-testing"
-            if significant else
-            "NÃO CONFIRMADO: o sinal não sobrevive à deflação (com ~1 ano a potência é baixa) — registrado honestamente, como PDV e HARX"
-        ),
+        "verdict": verdict,
     }

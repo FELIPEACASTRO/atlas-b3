@@ -7,11 +7,12 @@ type Resp = {
   ticker: string;
   available: boolean;
   n_names?: number;
-  pooled_days?: number;
-  pooled_sharpe_cond?: number;
-  pooled_sharpe_uncond?: number;
+  portfolio_days?: number;
+  portfolio_sharpe_cond?: number;
+  portfolio_sharpe_uncond?: number;
   deflated_sharpe?: number;
   significant?: boolean;
+  borderline?: boolean;
   adds_value_vs_uncond?: boolean;
   equity_curve?: number[] | null;
   per_name?: Name[];
@@ -54,7 +55,9 @@ export function EdgeBacktest({ ticker }: { ticker: string }) {
   }
 
   const sig = !!d.significant;
-  const col = sig ? "var(--up)" : "#d99a2b";
+  const bl = !!d.borderline;
+  const col = sig ? "var(--up)" : bl ? "#d99a2b" : "var(--down)";
+  const bandLabel = sig ? "CONFIRMADO pelo gate" : bl ? "LIMÍTROFE (quase confirma)" : "NÃO confirmado pelo gate";
   const curve = d.equity_curve ?? [];
   const W = 720, H = 120, padL = 30, padR = 10, padT = 10, padB = 16;
   let svg: React.ReactNode = null;
@@ -78,18 +81,20 @@ export function EdgeBacktest({ ticker }: { ticker: string }) {
       {head}
       <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1">
         <span className="rounded-md px-2 py-0.5 text-[11px] font-medium" style={{ background: `color-mix(in oklch, ${col} 16%, transparent)`, color: col }}>
-          {sig ? "CONFIRMADO pelo gate" : "NÃO confirmado pelo gate"}
+          {bandLabel}
         </span>
         <span className="text-[11px] text-[var(--text-tertiary)]">Deflated Sharpe <b className="mono" style={{ color: "var(--text-primary)" }}>{d.deflated_sharpe}</b> <span className="text-[10px]">(P Sharpe&gt;0; &gt;0.95 = confirma)</span></span>
-        <span className="text-[11px] text-[var(--text-tertiary)]">Sharpe condicional <b className="mono" style={{ color: "var(--text-primary)" }}>{d.pooled_sharpe_cond}</b> vs incondicional <b className="mono">{d.pooled_sharpe_uncond}</b> {d.adds_value_vs_uncond ? <span style={{ color: "var(--up)" }}>(o físico agrega valor)</span> : null}</span>
+        <span className="text-[11px] text-[var(--text-tertiary)]">Sharpe portfólio <b className="mono" style={{ color: "var(--text-primary)" }}>{d.portfolio_sharpe_cond}</b> vs vender-sempre <b className="mono">{d.portfolio_sharpe_uncond}</b> {d.adds_value_vs_uncond ? <span style={{ color: "var(--up)" }}>(condicionar ajuda)</span> : null}</span>
       </div>
       {svg}
       <p className="mt-2 text-[11px] leading-relaxed text-[var(--text-tertiary)]">
-        Walk-forward de “vender vol quando a nossa física diz que está cara” (VRP&gt;0) em {d.n_names} nomes líquidos, {d.pooled_days} dias-pool. O
-        <b> Deflated Sharpe</b> (López de Prado) desconta o multiple-testing sobre o universo. {sig
-          ? "O sinal sobrevive — o edge é estatisticamente real."
-          : "O condicionamento pelo físico agrega valor sobre vender vol sempre, mas o sinal ainda NÃO sobrevive à deflação com ~1 ano de dado — registrado honestamente, como PDV e HARX. O gate está fazendo o trabalho: não vendemos um edge que ele não confirmou."}
-        {" "}Proxy de prêmio de vol (não P&amp;L de opção delta-hedgeada, sem custos). Análise, não recomendação.
+        Walk-forward de “vender vol quando a nossa física diz que está cara” (VRP&gt;0) em {d.n_names} nomes líquidos; o
+        <b> Deflated Sharpe</b> (López de Prado) é aplicado ao <b>portfólio</b> equal-weight ({d.portfolio_days} dias), o objeto negociável — desconta o multiple-testing sobre os nomes. {sig
+          ? "O prêmio sobrevive — o edge é estatisticamente real."
+          : bl
+            ? "O prêmio é quase-significativo (limítrofe): com ~1 ano a evidência é sugestiva, não conclusiva. Honesto: não afirmamos um edge provado que o dado ainda não sustenta."
+            : "O prêmio não sobrevive à deflação — registrado honestamente, como PDV e HARX."}
+        {" "}Proxy grosseiro de prêmio de variância (não P&amp;L delta-hedgeado, sem custos; subestima o risco de cauda). Análise, não recomendação.
       </p>
     </div>
   );
