@@ -61,8 +61,7 @@
 
 - [ ] **Step 1 — teste que falha:** `harx(rv, exog)` recupera o HAR quando `exog` é nulo; `calendar_copom` é point-in-time (não vaza data futura); a flag "≤N dias do COPOM" liga/desliga corretamente.
 - [ ] **Step 2/3 — implementar:** HARX = HAR + colunas exógenas (B3-VIX nível/Δ, flag COPOM); OLS. `calendar_copom` com as datas reais (point-in-time).
-- [ ] **Step 4 — GATE:** HARX deve bater HAR-Lev no walk-forward + DM + MCS. **Caveat de dados (pré-requisito):** o S&P/B3 Ibovespa VIX **ainda não está ingerido na base** — é dado novo a buscar (lançado mar/2024, <2 anos). Sem ele, a task não roda; com ele, a janela de teste é curta → relatar IC honesto.
-- [ ] **Step 5 — commit:** `feat(predict): HARX with B3-VIX + COPOM (gated)`.
+- [x] **GATE — REJEITOU (testado no dado real).** **Correção de dados:** o B3-VIX oficial não tem API grátis (Yahoo 404, brapi vazio, Stooq com muro anti-bot; Investing/ADVFN só scraping; S&P pago) — MAS não precisa dele: computei um **proxy de vol-de-mercado da NOSSA base** (mediana da IV ATM entre os 231 nomes por dia, 252 dias; a base tem BOVA11/IBOV11 também). HARX = HAR-Lev + vol-de-mercado (nível/Δ). Walk-forward DM sobre QLIKE: **não passa em nenhum nome** (PETR4 p=0.39, VALE3 p=0.85, BBAS3 p=0.28, BOVA11 p=0.74, ITUB4 p=0.56). Como PDV, a vol de mercado não bate HAR-Lev em EOD/1 ano. **NÃO promovido.** (COPOM flag não chegou a ser testado — provável mesmo resultado.)
 
 ### Task 4: THAR/STHAR (regime-switching)
 
