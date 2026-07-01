@@ -1,7 +1,7 @@
 """Densidade física da vol: Student-t (caudas) + ajuste via VRP + POP.
 
 Distribuição dos log-retornos no horizonte T, centrada em 0 (drift=0 declarado),
-escala t.q. o desvio-padrão = σ_fís·√T, com σ_fís = rv + (1−λ)·vrp.
+escala t.q. o desvio-padrão = σ_fís·κ·√T, com σ_fís = rv + (1−λ)·vrp (κ = correção de cobertura).
 """
 import math
 
@@ -47,6 +47,17 @@ def test_quantiles_monotonic_and_bracket_spot():
     q10, q50, q90 = quantiles(d, [0.10, 0.50, 0.90])
     assert q10 < q50 < q90
     assert abs(q50 - 38.0) < 1e-6                     # mediana da t centrada = spot
+
+
+def test_kappa_widens_density_without_moving_sigma_or_median():
+    # κ (correção de subcobertura) infla a LARGURA da densidade, não a previsão de vol nem a mediana
+    base = physical_density(spot=38.0, sigma_iv=0.30, rv=0.30, vrp=0.0, T=30 / 365, kappa=1.0)
+    wide = physical_density(spot=38.0, sigma_iv=0.30, rv=0.30, vrp=0.0, T=30 / 365, kappa=1.10)
+    assert wide.sigma == base.sigma                              # σ_fís (E[RV]) intacto → VRP/painel não muda
+    b = base.logret_ppf(0.90) - base.logret_ppf(0.10)
+    w = wide.logret_ppf(0.90) - wide.logret_ppf(0.10)
+    assert abs(w / b - 1.10) < 1e-9                              # largura do intervalo 80% cresce exatamente ×κ
+    assert abs(wide.logret_ppf(0.5)) < 1e-12                     # mediana intacta (drift=0)
 
 
 def test_physical_density_rejects_incoherent_vrp():

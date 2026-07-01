@@ -23,10 +23,10 @@ class Density:
     """Densidade física dos log-retornos no horizonte. ``sigma`` é σ_fís ANUALIZADA."""
 
     spot: float
-    sigma: float        # σ_fís anualizada (vol física)
+    sigma: float        # σ_fís anualizada = previsão de E[RV] (usada no VRP/painel; NÃO inclui κ)
     nu: float           # graus de liberdade da Student-t (caudas)
     T: float            # horizonte em anos
-    _scale: float       # escala da t sobre log-retornos no horizonte (std = σ_fís·√T)
+    _scale: float       # escala da t sobre log-retornos no horizonte (std = σ_fís·κ·√T)
 
     def logret_cdf(self, x):
         return stats.t.cdf(x, df=self.nu, loc=0.0, scale=self._scale)
@@ -40,13 +40,16 @@ class Density:
 
 def physical_density(
     *, spot: float, sigma_iv: float, rv: float, vrp: float, T: float, lam: float = 0.5,
-    nu: float = 5.0, tol: float = 1e-6,
+    nu: float = 5.0, kappa: float = 1.10, tol: float = 1e-6,
 ) -> Density:
     """Densidade física dos log-retornos no horizonte ``T``.
 
     ``sigma_iv`` é **redundante** (por construção ``vrp ≈ sigma_iv − rv``, features.py:18) e
     serve só ao painel "mercado vs físico"; validamos a coerência para não admitir
-    estados incoerentes (review F6). ``nu>2`` p/ variância finita.
+    estados incoerentes (review F6). ``nu>2`` p/ variância finita. ``kappa`` infla a LARGURA da
+    densidade para corrigir a subcobertura sistemática (YZ enviesa p/ baixo, HAR encolhe p/ a
+    média); medido em walk-forward (10 nomes líquidos): mediana de cobertura 0.774→0.805 (nominal
+    0.80) de κ=1.0→1.10. Não altera ``sigma`` (previsão de E[RV]), só a incerteza da densidade.
     """
     if abs((rv + vrp) - sigma_iv) > tol:
         raise ValueError(
@@ -56,9 +59,9 @@ def physical_density(
         raise ValueError("nu must be > 2 for finite variance")
     if T <= 0:
         raise ValueError("T must be > 0")
-    sigma_fis = rv + (1.0 - lam) * vrp                       # encolhe a IV rumo à RV via VRP
-    horizon_std = sigma_fis * math.sqrt(T)                   # desvio dos log-retornos no horizonte
-    scale = horizon_std * math.sqrt((nu - 2.0) / nu)         # t.q. std da t = horizon_std
+    sigma_fis = rv + (1.0 - lam) * vrp                      # previsão de E[RV]: encolhe a IV rumo à RV via VRP
+    horizon_std = sigma_fis * kappa * math.sqrt(T)          # κ infla a LARGURA (cobertura), não a previsão pontual
+    scale = horizon_std * math.sqrt((nu - 2.0) / nu)         # t.q. std da t = σ_fís·κ·√T
     return Density(spot=spot, sigma=sigma_fis, nu=nu, T=T, _scale=scale)
 
 
