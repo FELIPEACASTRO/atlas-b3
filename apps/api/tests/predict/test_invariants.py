@@ -3,7 +3,6 @@
 Segue o plano de QA: quantificadores universais ("∀ perfil, ∀ capital, ∀ card válido: ...") que
 example-tests de 1 ponto não pegam. Sem dep nova (rng semeado em pytest cobre o essencial).
 """
-import math
 import random
 
 from atlas_api.predict.decision import _confidence, _kelly_lots, _verdict
