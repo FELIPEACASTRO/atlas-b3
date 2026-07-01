@@ -32,8 +32,9 @@ def premium_map(
 ) -> list[dict]:
     """Para cada nível de moneyness, ``P_mercado(S≤K)`` (RN/SVI) vs ``P_física(S≤K)`` e o edge.
 
-    ``phys_cdf`` é a CDF (recalibrada) do log-retorno físico (centro no spot). ``svi_k``/``svi_density``
-    é a densidade risco-neutra em ``k=log(K/forward)``. Retorna a lista ordenada por strike.
+    ``phys_cdf`` é a CDF do log-retorno físico, centrada no SPOT (drift=0). ``svi_k``/``svi_density``
+    é a densidade risco-neutra em ``k=log(K/forward)`` (centrada no forward). Retorna a lista
+    ordenada por strike.
     """
     if spot <= 0 or forward <= 0:
         raise ValueError("spot/forward must be > 0")
@@ -41,12 +42,12 @@ def premium_map(
     out: list[dict] = []
     for mny in moneyness:
         strike = spot * mny
-        k_fwd = math.log(strike / forward)                  # log-moneyness relativo ao FORWARD
-        # AMBAS as densidades no mesmo referencial (o forward) → isola o prêmio de VOL/SKEW,
-        # removendo o carry (drift livre de risco). Não prevemos direção (drift=0), então a
-        # diferença que importa é a de forma, não de nível.
-        p_market = rn_cdf(k_fwd)
-        p_phys = float(np.clip(phys_cdf(k_fwd), 0.0, 1.0))
+        # CADA densidade no seu próprio centro: a RN tem mediana no forward → avalia em log(K/forward);
+        # a física declara drift=0 (mediana no spot) → avalia em log(K/spot). Referenciar a física ao
+        # forward INTRODUZ um viés de −r·T (não é apples-to-apples quando r≠0). O edge é a diferença
+        # HONESTA de P(S_T ≤ K) entre as duas medidas; o carry (r·T) entra corretamente e é ~0 na B3.
+        p_market = rn_cdf(math.log(strike / forward))
+        p_phys = float(np.clip(phys_cdf(math.log(strike / spot)), 0.0, 1.0))
         out.append({
             "moneyness": round(mny, 4), "strike": round(strike, 2),
             "p_market": round(p_market, 4), "p_physical": round(p_phys, 4),

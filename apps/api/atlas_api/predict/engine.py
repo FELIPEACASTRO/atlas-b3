@@ -25,6 +25,12 @@ from .strategies import build_catalog, rationale
 from .validate import pit_uniformity
 
 _RECAL_WINDOW = 60     # janela da recalibração isotônica online (medido: rolante conserta, estático piora)
+# A recalibração é ajustada no PIT de 1 dia (é o horizonte com amostra robusta). Aplicá-la a
+# densidades de horizonte longo é INVÁLIDO (medido em backtest walk-forward por 2 agentes: a
+# forma da t de 1 dia não transfere para 30 dias — desloca até a mediana, e o PIT do 30d cai de
+# ~90% cru para ~16% ao aplicar a R de 1 dia). Só recalibra horizontes curtos; nos longos serve
+# a t crua (a √T + inflação de escala já cobrem). Honestidade > fingir calibração transferida.
+_RECAL_MAX_H_DAYS = 5
 
 YZ_WINDOW = 5          # janela do Yang-Zhang rolante (RV diária para o HAR)
 _MONTHLY = 21
@@ -198,16 +204,17 @@ def build_prediction(
     gap = round(sigma_iv - dens.sigma, 4)              # gap exibido: mercado − densidade física servida
     # calibração + recalibrador isotônico online p/ servir (validado no dado real)
     cal, r_serve = _calibration(rv, closes)
+    recal = r_serve if T_days <= _RECAL_MAX_H_DAYS else None   # R de 1 dia não transfere p/ horizontes longos
     pop_targets = [
         {"moneyness": mny, "price": round(spot * mny, 2),
-         "above": _recal_pop(dens, spot * mny, "above", r_serve),
-         "below": _recal_pop(dens, spot * mny, "below", r_serve)}
+         "above": _recal_pop(dens, spot * mny, "above", recal),
+         "below": _recal_pop(dens, spot * mny, "below", recal)}
         for mny in (0.95, 1.0, 1.05)
     ]
-    qs = [_recal_quantile(dens, q, r_serve) for q in (0.10, 0.25, 0.50, 0.75, 0.90)]
+    qs = [_recal_quantile(dens, q, recal) for q in (0.10, 0.25, 0.50, 0.75, 0.90)]
     dist = {
         "sigma_phys": round(dens.sigma, 4), "nu": dens.nu, "horizon_days": T_days,
-        "recalibrated": r_serve is not None,
+        "recalibrated": recal is not None,
         "pop_targets": pop_targets,
         "quantiles": {"p10": round(qs[0], 2), "p25": round(qs[1], 2), "p50": round(qs[2], 2),
                       "p75": round(qs[3], 2), "p90": round(qs[4], 2)},
@@ -349,17 +356,18 @@ def build_edge_map(
     physical = pred["market_vs_physical"]["physical"]
     rv = rv_series(ohlc, window=YZ_WINDOW)
     _, r_serve = _calibration(rv, closes)
+    recal = r_serve if dte <= _RECAL_MAX_H_DAYS else None   # não aplica R de 1 dia à densidade de ~30 dias
     dens = physical_density(spot=spot, sigma_iv=physical, rv=physical, vrp=0.0, T=dte / 365.0)
 
     def phys_cdf(x):
         c = float(dens.logret_cdf(x))
-        return float(r_serve.apply(c)) if r_serve is not None else c
+        return float(recal.apply(c)) if recal is not None else c
 
     grid = [round(x, 3) for x in np.linspace(0.85, 1.15, 13)]
     emap = premium_map(spot=spot, forward=fit["forward"], phys_cdf=phys_cdf,
                        svi_k=fit["k"], svi_density=fit["density"], moneyness=grid)
     return {
-        **base, "dte": dte, "recalibrated": r_serve is not None,
+        **base, "dte": dte, "recalibrated": recal is not None,
         "market_vs_physical": pred["market_vs_physical"], "regime": pred["regime"],
         "edge": emap,
         "note": "prêmio físico-vs-risco-neutro por strike (isola vol/skew) — análise, não recomendação",

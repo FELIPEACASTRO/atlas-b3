@@ -110,14 +110,21 @@ def fit_market_smile(
     iv_fit = np.sqrt(np.maximum(svi_total_variance(params, k), 0.0) / T)
     rmse = float(np.sqrt(np.average((iv_fit - iv_used) ** 2, weights=weights)))
     atm_var = float(svi_total_variance(params, np.array([0.0]))[0])
-    grid = np.linspace(float(k.min()) - 0.1, float(k.max()) + 0.1, 2000)
+    # No-arbitragem checada na região COM DADOS (±0.1 além dos strikes) — não na extrapolação das
+    # asas, que penalizaria smiles boas por um artefato do SVI longe de onde há mercado.
+    core = np.linspace(float(k.min()) - 0.1, float(k.max()) + 0.1, 2000)
+    arb_free = risk_neutral_density(params, core)["arbitrage_free"]
+    # Densidade servida num grid ESTENDIDO (±3σ além do núcleo) → captura >99.9% da massa, para a
+    # CDF do Edge Map não enviesar as asas ao renormalizar (bug medido: −0.026 nas puts baixas).
+    pad = max(0.1, 3.0 * float(np.sqrt(max(atm_var, 1e-8))))
+    grid = np.linspace(float(k.min()) - pad, float(k.max()) + pad, 3000)
     rnd = risk_neutral_density(params, grid)
     return {
         "params": params,
         "atm_vol": float(np.sqrt(max(atm_var, 0.0) / T)),
-        "arbitrage_free": rnd["arbitrage_free"],
+        "arbitrage_free": arb_free,
         "rmse": round(rmse, 4),
-        "usable": bool(rnd["arbitrage_free"] and rmse <= max_rmse),
+        "usable": bool(arb_free and rmse <= max_rmse),
         "n_strikes": int(ok.sum()),
         "forward": float(fwd),
         "density": rnd["density"],

@@ -47,29 +47,34 @@ class IsotonicRecalibrator:
         self._r: np.ndarray | None = None
 
     def fit(self, pit_cal) -> "IsotonicRecalibrator":
-        """Ajusta R aos PIT de calibração: x = PIT ordenado, alvo = posições uniformes."""
+        """Ajusta R aos PIT de calibração: x = PIT ordenado, alvo = posições uniformes.
+
+        Âncora nas pontas (0,0) e (1,1) para EXTRAPOLAR monotonicamente fora do suporte
+        observado, em vez de cravar a cauda. Bug medido no dado real: uma CDF crua acima do
+        maior PIT de calibração saturava em 1.0 (PETR4: p_física OTM=1.0000 vs ~0.96 real),
+        achatando a cauda da densidade recalibrada e virando o edge de strikes OTM em artefato.
+        """
         x = np.sort(np.asarray(pit_cal, dtype=float))
         n = x.size
         if n < 2:
             raise ValueError("need >= 2 calibration PIT values")
         targets = (np.arange(n) + 0.5) / n           # plotting positions uniformes
-        self._x = x
-        self._r = pava(targets)                       # já monotônico; PAVA p/ robustez a empates
+        r = pava(targets)                             # já monotônico; PAVA p/ robustez a empates
+        self._x = np.concatenate([[0.0], x, [1.0]])  # âncoras → interpola até (0,0) e (1,1)
+        self._r = np.concatenate([[0.0], r, [1.0]])
         return self
 
     def apply(self, p):
-        """Aplica R a um PIT (ou array): ``R(p)`` por interpolação, clampada em [0,1]."""
+        """Aplica R a um PIT (ou array): ``R(p)`` por interpolação ancorada, clampada em [0,1]."""
         if self._x is None or self._r is None:
             raise RuntimeError("fit() before apply()")
-        out = np.interp(np.asarray(p, dtype=float), self._x, self._r, left=0.0, right=1.0)
-        return np.clip(out, 0.0, 1.0)
+        return np.clip(np.interp(np.asarray(p, dtype=float), self._x, self._r), 0.0, 1.0)
 
     def inverse(self, q):
         """R⁻¹(q): nível de CDF crua que recalibrado vira ``q`` — usado p/ recalibrar quantis."""
         if self._x is None or self._r is None:
             raise RuntimeError("fit() before inverse()")
-        out = np.interp(np.asarray(q, dtype=float), self._r, self._x, left=0.0, right=1.0)
-        return np.clip(out, 0.0, 1.0)
+        return np.clip(np.interp(np.asarray(q, dtype=float), self._r, self._x), 0.0, 1.0)
 
 
 def online_recalibrator(pit_history, *, window: int = 60) -> IsotonicRecalibrator | None:
