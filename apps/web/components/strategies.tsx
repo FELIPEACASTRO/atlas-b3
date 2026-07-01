@@ -9,6 +9,7 @@ type Strategy = {
   name: string;
   thesis: string;
   defined_risk: boolean;
+  capped_gain: boolean;
   vol_stance: string;
   lots: number;
   sizing: { conservador: number; moderado: number; agressivo: number };
@@ -216,7 +217,7 @@ function StrategyCard({ s, top, perfil }: { s: Strategy; top: boolean; perfil: "
         <span>lotes <span className="text-[9.5px]">({perfil})</span>: <b className="mono" style={{ color: "var(--text-secondary)" }}>{lots}</b></span>
         <span>risco máx: <b className="mono" style={{ color: "var(--down)" }}>{brl(maxLoss)}</b></span>
         <span title="perda esperada nos 5% piores desfechos (na densidade)">CVaR 5%: <b className="mono" style={{ color: "var(--down)" }}>{brl(cvar)}</b></span>
-        <span>ganho máx: <b className="mono" style={{ color: "var(--up)" }}>{s.defined_risk ? brl(maxGain) : "alto"}</b></span>
+        <span>ganho máx: <b className="mono" style={{ color: "var(--up)" }}>{s.capped_gain ? brl(maxGain) : "alto"}</b></span>
         {s.breakevens.length ? <span>breakeven: <b className="mono" style={{ color: "var(--text-secondary)" }}>{s.breakevens.join(" / ")}</b></span> : null}
       </div>
     </div>

@@ -140,10 +140,13 @@ def _kelly_lots(*, card, capital, perfil, size_conf, gate) -> dict:
 def _invalidation(*, dens, spot, quantiles, mvp, vol_stance, thesis) -> dict:
     """Condições que MATAM a tese — da própria densidade e do VRP. A decisão tem prazo de validade."""
     selling = vol_stance == "vender"
-    # invalidação de preço = a cauda ADVERSA à tese: alta/renda/neutra → p10 (queda); baixa → p90 (alta).
-    # (antes cravava p10 sempre → para tese de baixa o "stop" saía na direção que FAVORECE o trader.)
-    adverse_up = thesis == "baixa"
-    price_stop = (quantiles.get("p90") if adverse_up else quantiles.get("p10")) if mvp else None
+    # invalidação de preço = a cauda ADVERSA à tese direcional: baixa → p90 (alta); alta/renda → p10 (queda).
+    # Estrutura NEUTRA (straddle/strangle comprado) é invalidada por FICAR DE LADO, não por cruzar um
+    # preço → sem stop de cauda única (senão o rótulo engana).
+    if not mvp or thesis == "neutro":
+        price_stop = None
+    else:
+        price_stop = quantiles.get("p90") if thesis == "baixa" else quantiles.get("p10")
     iv, phys = mvp.get("iv"), mvp.get("physical")
     vol_stop = None
     if iv is not None and phys is not None:

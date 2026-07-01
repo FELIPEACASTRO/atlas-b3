@@ -196,8 +196,14 @@ def build_catalog(spot: float, dens: Density, chain: list[dict], *, visao: str,
         lots = sizing["moderado"]                                   # default = moderado
         if lots < 1:
             continue
+        # ganho LIMITADO? posição net-long em calls (ou puts) tem ganho ilimitado (compra de call/
+        # straddle/strangle) — distinto de "risco definido" (perda), que é o prêmio. Desacopla o display.
+        net_calls = sum((1 if leg.action == "long" else -1) for leg in legs if leg.kind == "call")
+        net_puts = sum((1 if leg.action == "long" else -1) for leg in legs if leg.kind == "put")
+        capped_gain = not (net_calls > 0 or net_puts > 0)
         results.append({
-            "name": name, "thesis": thesis, "defined_risk": defined, "lots": lots, "sizing": sizing,
+            "name": name, "thesis": thesis, "defined_risk": defined, "capped_gain": capped_gain,
+            "lots": lots, "sizing": sizing,
             "vol_stance": "vender" if any(leg.action == "short" for leg in legs) and e1["cost"] <= 0 else "comprar",
             "legs": [{"kind": leg.kind, "action": leg.action, "strike": leg.strike, "premium": leg.premium} for leg in legs],
             "pop": e1["pop"], "breakevens": e1["breakevens"],       # independentes do nº de lotes
