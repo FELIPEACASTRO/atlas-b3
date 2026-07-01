@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+import { readTicker, writeTicker } from "@/lib/ticker";
 import { VolHistory } from "@/components/vol-history";
 import { CalibrationPanel } from "@/components/calibration-panel";
 import { CalibrationHealth } from "@/components/calibration-health";
@@ -43,15 +44,13 @@ export function OptionsChain() {
   const [kind, setKind] = useState<"all" | "call" | "put">("all");
   const [openOpt, setOpenOpt] = useState<string | null>(null);
 
-  // deep-link from the command palette: /opcoes?t=PETR4
+  // deep-link (/opcoes?t=PETR4) OU contexto global — o ativo viaja entre as telas
   useEffect(() => {
-    const t = new URLSearchParams(window.location.search).get("t");
-    if (t) {
-      const u = t.toUpperCase();
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time deep-link sync from the URL
-      setTicker(u);
-      setInput(u);
-    }
+    const urlT = new URLSearchParams(window.location.search).get("t");
+    const t = (urlT || readTicker()).toUpperCase();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time deep-link/context sync
+    setTicker(t);
+    setInput(t);
   }, []);
 
   useEffect(() => {
@@ -90,7 +89,9 @@ export function OptionsChain() {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            setTicker(input.toUpperCase().trim() || "PETR4");
+            const u = input.toUpperCase().trim() || "PETR4";
+            setTicker(u);
+            writeTicker(u);
           }}
           className="flex min-w-0 flex-1 gap-2 sm:flex-none"
         >

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+import { readTicker, writeTicker } from "@/lib/ticker";
 import { EdgeBacktest } from "@/components/edge-backtest";
 
 type Leg = { kind: string; action: string; strike: number; premium: number };
@@ -60,6 +61,15 @@ export function Strategies() {
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(true);
 
+  // deep-link (/estrategias?t=PETR4) OU contexto global — o ativo viaja entre as telas
+  useEffect(() => {
+    const urlT = new URLSearchParams(window.location.search).get("t");
+    const t = (urlT || readTicker()).toUpperCase();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time deep-link/context sync
+    setTicker(t);
+    setInput(t);
+  }, []);
+
   useEffect(() => {
     let alive = true;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reset loading when inputs change
@@ -103,12 +113,12 @@ export function Strategies() {
 
       {/* inputs */}
       <form
-        onSubmit={(e) => { e.preventDefault(); setTicker(input.toUpperCase().trim() || "PETR4"); }}
+        onSubmit={(e) => { e.preventDefault(); const u = input.toUpperCase().trim() || "PETR4"; setTicker(u); writeTicker(u); }}
         className="mb-4 grid gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3 sm:grid-cols-[1fr_1fr_1fr_auto]"
       >
         <label className="text-[11px] text-[var(--text-tertiary)]">
           Ativo
-          <input value={input} onChange={(e) => setInput(e.target.value)} onBlur={() => setTicker(input.toUpperCase().trim() || "PETR4")}
+          <input value={input} onChange={(e) => setInput(e.target.value)} onBlur={() => { const u = input.toUpperCase().trim() || "PETR4"; setTicker(u); writeTicker(u); }}
             className="mono mt-1 w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2.5 py-1.5 text-[13px] uppercase outline-none" />
         </label>
         <label className="text-[11px] text-[var(--text-tertiary)]">

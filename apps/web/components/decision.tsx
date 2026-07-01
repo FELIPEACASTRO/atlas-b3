@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { readTicker, writeTicker } from "@/lib/ticker";
+
 type Sizing = { lots: number; kelly_frac?: number; binding?: string; cvar_at_risk?: number; reason?: string };
 type Why = { tese: string; sinais: string; ressalva: string; concordam: string[]; divergem: string[] };
 type Econ = { pop: number; ev_lot: number; cvar_lot: number; max_loss_lot: number; max_gain_lot: number };
@@ -47,15 +49,13 @@ export function Decision() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
-  // deep-link: /decisao?t=PETR4 (o ativo viaja das telas de análise — costura a jornada)
+  // deep-link (/decisao?t=PETR4) OU contexto global — o ativo viaja das telas de análise (a jornada)
   useEffect(() => {
-    const t = new URLSearchParams(window.location.search).get("t");
-    if (t) {
-      const u = t.toUpperCase();
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time deep-link sync from the URL
-      setTicker(u);
-      setInput(u);
-    }
+    const urlT = new URLSearchParams(window.location.search).get("t");
+    const t = (urlT || readTicker()).toUpperCase();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time deep-link/context sync
+    setTicker(t);
+    setInput(t);
   }, []);
 
   useEffect(() => {
@@ -86,10 +86,10 @@ export function Decision() {
       </p>
 
       {/* inputs */}
-      <form onSubmit={(e) => { e.preventDefault(); setTicker(input.toUpperCase().trim() || "PETR4"); }}
+      <form onSubmit={(e) => { e.preventDefault(); const u = input.toUpperCase().trim() || "PETR4"; setTicker(u); writeTicker(u); }}
         className="mb-4 grid gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3 sm:grid-cols-[1fr_1fr_1fr_auto]">
         <label className="text-[11px] text-[var(--text-tertiary)]">Ativo
-          <input value={input} onChange={(e) => setInput(e.target.value)} onBlur={() => setTicker(input.toUpperCase().trim() || "PETR4")}
+          <input value={input} onChange={(e) => setInput(e.target.value)} onBlur={() => { const u = input.toUpperCase().trim() || "PETR4"; setTicker(u); writeTicker(u); }}
             className="mono mt-1 w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2.5 py-1.5 text-[13px] uppercase outline-none" />
         </label>
         <label className="text-[11px] text-[var(--text-tertiary)]">Capital de risco (R$)
