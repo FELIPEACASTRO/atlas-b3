@@ -127,3 +127,86 @@ def coverage(y, lo, hi) -> float:
     """Fração dos realizados dentro do envelope ``[lo, hi]`` (deveria bater o nominal)."""
     y = np.asarray(y, dtype=float)
     return float(np.mean((y >= np.asarray(lo, dtype=float)) & (y <= np.asarray(hi, dtype=float))))
+
+
+# ---- Harness de multiple-testing (ML-2): Deflated Sharpe · MCS · Hansen SPA ----
+
+_EULER = 0.5772156649015329          # constante de Euler-Mascheroni
+
+
+def _expected_max_normal(n: int) -> float:
+    """E[máx de n normais padrão iid] (aprox. de López de Prado via estatística de ordem)."""
+    if n < 2:
+        return 0.0
+    return (1.0 - _EULER) * float(stats.norm.ppf(1.0 - 1.0 / n)) + _EULER * float(
+        stats.norm.ppf(1.0 - 1.0 / (n * math.e))
+    )
+
+
+def deflated_sharpe(returns, trial_sharpes) -> float:
+    """Deflated Sharpe Ratio (López de Prado 2014): P(Sharpe verdadeiro > 0) descontando o
+    multiple-testing (nº de tentativas) e a não-normalidade (skew/curtose). Em [0,1]."""
+    r = np.asarray(returns, dtype=float)
+    ts = np.asarray(trial_sharpes, dtype=float)
+    n = r.size
+    sd = r.std(ddof=1)
+    if sd <= 0 or n < 3:
+        return 0.0
+    sr = float(r.mean() / sd)
+    z = (r - r.mean()) / sd
+    skew = float(np.mean(z ** 3))
+    kurt = float(np.mean(z ** 4))                       # não-excesso (normal = 3)
+    n_trials = ts.size
+    sr0 = math.sqrt(float(np.var(ts, ddof=1))) * _expected_max_normal(n_trials) if n_trials >= 2 else 0.0
+    denom = math.sqrt(max(1.0 - skew * sr + (kurt - 1.0) / 4.0 * sr * sr, 1e-12))
+    return float(stats.norm.cdf((sr - sr0) * math.sqrt(n - 1) / denom))
+
+
+def _block_bootstrap_index(n: int, block: int, rng) -> np.ndarray:
+    """Índices de um bootstrap de blocos circular (preserva autocorrelação)."""
+    idx: list[int] = []
+    while len(idx) < n:
+        start = int(rng.integers(0, n))
+        idx.extend((start + np.arange(block)) % n)
+    return np.asarray(idx[:n], dtype=int)
+
+
+def model_confidence_set(losses: dict, *, alpha: float = 0.1, B: int = 500,
+                         block: int = 10, seed: int = 0) -> set:
+    """Model Confidence Set (Hansen-Lunde-Nason 2011): o conjunto de modelos indistinguíveis
+    do melhor a confiança 1−α. Elimina o pior enquanto a igualdade de acurácia é rejeitada."""
+    names = list(losses)
+    L = np.column_stack([np.asarray(losses[k], dtype=float) for k in names])
+    n = L.shape[0]
+    rng = np.random.default_rng(seed)
+    boot_idx = [_block_bootstrap_index(n, block, rng) for _ in range(B)]
+    surviving = list(range(len(names)))
+    while len(surviving) > 1:
+        Ls = L[:, surviving]
+        dev = Ls - Ls.mean(axis=1, keepdims=True)       # perda de cada modelo menos a média do conjunto
+        di = dev.mean(axis=0)
+        boot_di = np.array([dev[ix].mean(axis=0) for ix in boot_idx])
+        sd = np.sqrt(np.maximum(boot_di.var(axis=0, ddof=1), 1e-15))
+        t = di / sd
+        t_max = float(t.max())
+        boot_t_max = ((boot_di - di) / sd).max(axis=1)   # recentrado sob H0
+        p = float(np.mean(boot_t_max >= t_max))
+        if p >= alpha:
+            break                                        # não rejeita: todos os sobreviventes entram no MCS
+        surviving.remove(surviving[int(np.argmax(t))])   # elimina o pior
+    return {names[i] for i in surviving}
+
+
+def hansen_spa(benchmark, models: dict, *, B: int = 500, block: int = 10, seed: int = 0) -> float:
+    """Hansen SPA (Reality-Check studentizado): p-valor de H0 = 'nenhum modelo bate o benchmark'.
+    ``d = perda_benchmark − perda_modelo`` (positivo = modelo melhor). p pequeno → há edge."""
+    b = np.asarray(benchmark, dtype=float)
+    d = np.column_stack([b - np.asarray(models[k], dtype=float) for k in models])
+    n = d.shape[0]
+    dbar = d.mean(axis=0)
+    rng = np.random.default_rng(seed)
+    boot = np.array([d[_block_bootstrap_index(n, block, rng)].mean(axis=0) for _ in range(B)])
+    sd = np.maximum(boot.std(axis=0, ddof=1), 1e-15)
+    t_spa = float(np.max(np.maximum(dbar / sd, 0.0)))
+    boot_t = np.max(np.maximum((boot - dbar) / sd, 0.0), axis=1)  # recentrado
+    return float(np.mean(boot_t >= t_spa))
