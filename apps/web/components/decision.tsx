@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { readTicker, writeTicker } from "@/lib/ticker";
+
 type Sizing = { lots: number; kelly_frac?: number; binding?: string; cvar_at_risk?: number; reason?: string };
 type Why = { tese: string; sinais: string; ressalva: string; concordam: string[]; divergem: string[] };
 type Econ = { pop: number; ev_lot: number; cvar_lot: number; max_loss_lot: number; max_gain_lot: number };
@@ -10,6 +12,7 @@ type Leg = { kind: string; action: string; strike: number; premium: number };
 type Card = {
   name: string; thesis: string; defined_risk: boolean; vol_stance: string; legs: Leg[]; breakevens: number[];
   verdict: string; decision_score: number; sizing: Sizing; economics: Econ; why: Why; invalidation: Inval;
+  reactivate?: string | null;
 };
 type Conf = { score: number; band: string; factors: Record<string, number> };
 type Resp = {
@@ -46,6 +49,15 @@ export function Decision() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
+  // deep-link (/decisao?t=PETR4) OU contexto global — o ativo viaja das telas de análise (a jornada)
+  useEffect(() => {
+    const urlT = new URLSearchParams(window.location.search).get("t");
+    const t = (urlT || readTicker()).toUpperCase();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time deep-link/context sync
+    setTicker(t);
+    setInput(t);
+  }, []);
+
   useEffect(() => {
     let alive = true;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reset while refetching
@@ -74,10 +86,10 @@ export function Decision() {
       </p>
 
       {/* inputs */}
-      <form onSubmit={(e) => { e.preventDefault(); setTicker(input.toUpperCase().trim() || "PETR4"); }}
+      <form onSubmit={(e) => { e.preventDefault(); const u = input.toUpperCase().trim() || "PETR4"; setTicker(u); writeTicker(u); }}
         className="mb-4 grid gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3 sm:grid-cols-[1fr_1fr_1fr_auto]">
         <label className="text-[11px] text-[var(--text-tertiary)]">Ativo
-          <input value={input} onChange={(e) => setInput(e.target.value)} onBlur={() => setTicker(input.toUpperCase().trim() || "PETR4")}
+          <input value={input} onChange={(e) => setInput(e.target.value)} onBlur={() => { const u = input.toUpperCase().trim() || "PETR4"; setTicker(u); writeTicker(u); }}
             className="mono mt-1 w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2.5 py-1.5 text-[13px] uppercase outline-none" />
         </label>
         <label className="text-[11px] text-[var(--text-tertiary)]">Capital de risco (R$)
@@ -140,7 +152,7 @@ export function Decision() {
           </div>
           {d.abstain?.is_abstained ? (
             <div className="mt-3 rounded-lg px-3 py-2 text-[12px]" style={{ background: "color-mix(in oklch, var(--down) 12%, transparent)", color: "var(--down)" }}>
-              <b>Fique de fora.</b> {d.abstain.reason}. Nenhuma estrutura é recomendada — a decisão honesta é não operar.
+              <b>Fique de fora.</b> {d.abstain.reason}. Nenhuma estrutura é recomendada — a decisão honesta é não operar. <span style={{ opacity: 0.85 }}>↻ Reavalie quando a densidade recalibrar (o monitor de PIT precisa voltar acima de 0.05).</span>
             </div>
           ) : null}
         </div>
@@ -186,6 +198,13 @@ function DecisionCard({ c, top }: { c: Card; top: boolean }) {
           {s.binding ? <span className="text-[10px] text-[var(--text-tertiary)]">limitado por {s.binding}</span> : null}
         </> : <span className="text-[10px] text-[var(--text-tertiary)]">{s.reason ?? "Kelly ≤ 0: sem edge de crescimento"}</span>}
       </div>
+
+      {/* gatilho de retorno: o que faria este "não" virar "opere" */}
+      {c.reactivate ? (
+        <div className="mb-1.5 flex items-start gap-1.5 text-[11px]" style={{ color: "var(--accent)" }}>
+          <span aria-hidden>↻</span><span>{c.reactivate}</span>
+        </div>
+      ) : null}
 
       {/* pernas */}
       <div className="mb-1.5 flex flex-wrap gap-1.5">

@@ -92,17 +92,18 @@ def build_briefing(s: Setup) -> Briefing:
 
     case_for: list[str] = []
     case_against: list[str] = []
-    if label == "rico":
-        case_for.append("IV acima da RV: você vende volatilidade cara.")
-    elif label == "barato":
-        case_for.append("IV abaixo da RV: você compra volatilidade barata.")
-
     if is_short_vol:
+        if label == "rico":
+            case_for.append("IV acima da RV: você vende volatilidade cara.")
+        else:                                   # a estrutura vende vol, mas a vol NÃO está cara
+            case_against.append("A vol NÃO está cara (IV≈RV ou IV<RV): o edge de VENDER vol é fraco aqui — sobra theta e risco definido.")
         case_for.append("Estrutura de risco definido limita a perda máxima.")
         case_for.append("Theta a favor se o ativo ficar de lado.")
         case_against.append("É short-vol: você é pago por risco de cauda, não por uma ineficiência.")
         case_against.append("Gap/evento move a IV contra você rápido; o spread largo come parte do prêmio.")
     else:
+        if label == "barato":
+            case_for.append("IV abaixo da RV: você compra volatilidade barata.")
         case_against.append("Comprar prêmio sangra por theta: precisa de movimento para pagar.")
 
     if not case_against:  # honesty invariant: never one-sided
@@ -111,15 +112,15 @@ def build_briefing(s: Setup) -> Briefing:
     ratio = (s.max_gain_per_lot / s.max_loss_per_lot) if s.max_loss_per_lot > 0 else None
     rr = RiskReward(s.max_gain_per_lot, s.max_loss_per_lot, s.breakeven, ratio)
 
-    verdict = (
-        "Análise transparente, não um sinal: "
-        + (
+    if is_short_vol:
+        vtxt = (
             "vender prêmio caro com risco definido — você é pago por carregar risco de cauda. "
-            if is_short_vol
-            else "exposição a volatilidade com theta contra. "
+            if label == "rico"
+            else "a estrutura vende prêmio, mas a vol NÃO está especialmente cara hoje — o edge de vol é fraco; o que sobra é theta e risco definido. "
         )
-        + "A decisão é sua."
-    )
+    else:
+        vtxt = "exposição a volatilidade com theta contra. "
+    verdict = "Análise transparente, não um sinal: " + vtxt + "A decisão é sua."
 
     return Briefing(
         ticker=s.ticker,

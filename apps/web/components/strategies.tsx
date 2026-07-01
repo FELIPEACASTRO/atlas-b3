@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
+import { readTicker, writeTicker } from "@/lib/ticker";
 import { EdgeBacktest } from "@/components/edge-backtest";
 
 type Leg = { kind: string; action: string; strike: number; premium: number };
@@ -9,6 +11,7 @@ type Strategy = {
   name: string;
   thesis: string;
   defined_risk: boolean;
+  capped_gain: boolean;
   vol_stance: string;
   lots: number;
   sizing: { conservador: number; moderado: number; agressivo: number };
@@ -58,6 +61,15 @@ export function Strategies() {
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(true);
 
+  // deep-link (/estrategias?t=PETR4) OU contexto global — o ativo viaja entre as telas
+  useEffect(() => {
+    const urlT = new URLSearchParams(window.location.search).get("t");
+    const t = (urlT || readTicker()).toUpperCase();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time deep-link/context sync
+    setTicker(t);
+    setInput(t);
+  }, []);
+
   useEffect(() => {
     let alive = true;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reset loading when inputs change
@@ -90,6 +102,10 @@ export function Strategies() {
         <span className="rounded px-1.5 py-0.5 text-[10px]" style={{ background: "color-mix(in oklch, var(--accent) 14%, transparent)", color: "var(--accent)" }}>
           POP + valor esperado, não recomendação
         </span>
+        <Link href={`/decisao?t=${ticker}`} className="ml-auto rounded-lg px-2.5 py-1 text-[12px] font-medium"
+          style={{ background: "var(--accent)", color: "var(--bg-base)" }}>
+          Decidir sobre {ticker} →
+        </Link>
       </div>
       <p className="mb-3 text-[12px] text-[var(--text-tertiary)]">
         diga ativo, capital de risco, prazo e sua visão — o ATLAS monta estruturas da cadeia real e mede cada uma na densidade calibrada.
@@ -97,12 +113,12 @@ export function Strategies() {
 
       {/* inputs */}
       <form
-        onSubmit={(e) => { e.preventDefault(); setTicker(input.toUpperCase().trim() || "PETR4"); }}
+        onSubmit={(e) => { e.preventDefault(); const u = input.toUpperCase().trim() || "PETR4"; setTicker(u); writeTicker(u); }}
         className="mb-4 grid gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3 sm:grid-cols-[1fr_1fr_1fr_auto]"
       >
         <label className="text-[11px] text-[var(--text-tertiary)]">
           Ativo
-          <input value={input} onChange={(e) => setInput(e.target.value)} onBlur={() => setTicker(input.toUpperCase().trim() || "PETR4")}
+          <input value={input} onChange={(e) => setInput(e.target.value)} onBlur={() => { const u = input.toUpperCase().trim() || "PETR4"; setTicker(u); writeTicker(u); }}
             className="mono mt-1 w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2.5 py-1.5 text-[13px] uppercase outline-none" />
         </label>
         <label className="text-[11px] text-[var(--text-tertiary)]">
@@ -216,7 +232,7 @@ function StrategyCard({ s, top, perfil }: { s: Strategy; top: boolean; perfil: "
         <span>lotes <span className="text-[9.5px]">({perfil})</span>: <b className="mono" style={{ color: "var(--text-secondary)" }}>{lots}</b></span>
         <span>risco máx: <b className="mono" style={{ color: "var(--down)" }}>{brl(maxLoss)}</b></span>
         <span title="perda esperada nos 5% piores desfechos (na densidade)">CVaR 5%: <b className="mono" style={{ color: "var(--down)" }}>{brl(cvar)}</b></span>
-        <span>ganho máx: <b className="mono" style={{ color: "var(--up)" }}>{s.defined_risk ? brl(maxGain) : "alto"}</b></span>
+        <span>ganho máx: <b className="mono" style={{ color: "var(--up)" }}>{s.capped_gain ? brl(maxGain) : "alto"}</b></span>
         {s.breakevens.length ? <span>breakeven: <b className="mono" style={{ color: "var(--text-secondary)" }}>{s.breakevens.join(" / ")}</b></span> : null}
       </div>
     </div>

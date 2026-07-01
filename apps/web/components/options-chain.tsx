@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
+import { readTicker, writeTicker } from "@/lib/ticker";
 import { VolHistory } from "@/components/vol-history";
 import { CalibrationPanel } from "@/components/calibration-panel";
 import { CalibrationHealth } from "@/components/calibration-health";
@@ -38,35 +40,39 @@ export function OptionsChain() {
   const [rows, setRows] = useState<Row[]>([]);
   const [prov, setProv] = useState("");
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
   const [kind, setKind] = useState<"all" | "call" | "put">("all");
   const [openOpt, setOpenOpt] = useState<string | null>(null);
 
-  // deep-link from the command palette: /opcoes?t=PETR4
+  // deep-link (/opcoes?t=PETR4) OU contexto global — o ativo viaja entre as telas
   useEffect(() => {
-    const t = new URLSearchParams(window.location.search).get("t");
-    if (t) {
-      const u = t.toUpperCase();
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time deep-link sync from the URL
-      setTicker(u);
-      setInput(u);
-    }
+    const urlT = new URLSearchParams(window.location.search).get("t");
+    const t = (urlT || readTicker()).toUpperCase();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time deep-link/context sync
+    setTicker(t);
+    setInput(t);
   }, []);
 
   useEffect(() => {
     let alive = true;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reset loading when the ticker changes
     setLoading(true);
+    setErr("");
     fetch(`${API}/chain/${ticker}`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(r.status === 503 ? "Terminal sem dados de mercado carregados." : `Falha ao carregar a cadeia (erro ${r.status}).`);
+        return r.json();
+      })
       .then((d: Row[]) => {
         if (!alive) return;
         setRows(Array.isArray(d) ? d : []);
         setProv(d?.[0]?.provenance ?? "");
         setLoading(false);
       })
-      .catch(() => {
+      .catch((e) => {
         if (alive) {
           setRows([]);
+          setErr(e instanceof Error ? e.message : "falha na conexão com o terminal");
           setLoading(false);
         }
       });
@@ -83,7 +89,9 @@ export function OptionsChain() {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            setTicker(input.toUpperCase().trim() || "PETR4");
+            const u = input.toUpperCase().trim() || "PETR4";
+            setTicker(u);
+            writeTicker(u);
           }}
           className="flex min-w-0 flex-1 gap-2 sm:flex-none"
         >
@@ -99,6 +107,13 @@ export function OptionsChain() {
             Buscar
           </button>
         </form>
+        <Link
+          href={`/decisao?t=${ticker}`}
+          className="rounded-lg px-3 py-2 text-[13px] font-medium"
+          style={{ background: "var(--accent)", color: "var(--bg-base)" }}
+        >
+          Decidir sobre {ticker} →
+        </Link>
         <div className="ml-auto flex gap-1.5">
           {(["all", "call", "put"] as const).map((k) => (
             <button
@@ -124,6 +139,8 @@ export function OptionsChain() {
 
       {loading ? (
         <p className="text-[13px] text-[var(--text-tertiary)]">carregando cadeia…</p>
+      ) : err ? (
+        <p className="text-[13px]" style={{ color: "var(--down)" }}>{err}</p>
       ) : rows.length === 0 ? (
         <p className="text-[13px] text-[var(--text-secondary)]">
           Sem cadeia para {ticker}. Rode a ingestão e tente um subjacente líquido (PETR4, VALE3, BOVA11).

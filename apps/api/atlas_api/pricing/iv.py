@@ -27,7 +27,8 @@ _PRICE_FLOOR = 0.01  # one B3 tick
 # stale EOD prints sit at parity (no extrinsic value to infer vol from), and the
 # bisection then returns absurd vols (real data: PETRB930 = 464%). These are
 # disclosed heuristics, not a model — see docs/LICOES-ERROS-E-ACERTOS.md.
-_MAX_PLAUSIBLE_IV = 3.0   # 300% annualized; above this an EOD print is an artifact
+_MAX_PLAUSIBLE_IV = 2.0   # 200% annualized; medido no atlas.db: >200% são 0,42% dos pts, todos em
+#                           ilíquidas/BDRs/eventos corporativos (AMBP3 no agrupamento) — artefatos, não vol real
 _MIN_EXTRINSIC = 0.01     # R$ of time value; at/below intrinsic the IV is undefined
 
 

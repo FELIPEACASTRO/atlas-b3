@@ -63,6 +63,13 @@ const TOOL_LABEL: Record<string, string> = {
   search_options: "buscou opções",
   analyze_option: "analisou a opção",
   vol_history: "histórico de vol",
+  market_summary: "panorama do mercado",
+  term_structure: "estrutura a termo",
+  briefing: "montou o briefing",
+  portfolio: "leu a carteira",
+  screen_guide: "explicou a tela",
+  glossary: "consultou o glossário",
+  solution_overview: "explicou o ATLAS",
 };
 
 export function Chat() {

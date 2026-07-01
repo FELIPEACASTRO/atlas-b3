@@ -13,7 +13,7 @@ import sqlite3
 from dataclasses import asdict
 from datetime import date, datetime, timezone
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -134,7 +134,7 @@ def summary() -> dict:
 
 
 @app.get("/briefing/{underlying}", response_model=BriefingResponse)
-def briefing(underlying: str, capital: float = 50000.0) -> BriefingResponse:
+def briefing(underlying: str, capital: float = Query(50000.0, gt=0, le=1e12)) -> BriefingResponse:
     """Real briefing for a real underlying: a defined-risk call spread built from
     two adjacent strikes of the nearest expiry, with real premiums/IV/RV."""
     underlying = underlying.upper()
@@ -203,7 +203,12 @@ def _open_writable() -> sqlite3.Connection:
     path = os.environ.get("ATLAS_DB")
     if not path:
         raise HTTPException(status_code=503, detail="defina ATLAS_DB para usar a carteira")
-    return store.connect(path)
+    try:
+        conn = store.connect(path)
+        conn.execute("SELECT 1")                  # dispara cedo se o arquivo está corrompido → 503 (paridade com /chain etc.)
+        return conn
+    except sqlite3.DatabaseError:
+        raise HTTPException(status_code=503, detail="base de dados indisponível ou corrompida") from None
 
 
 def _enrich_positions(conn) -> list[PositionRow]:
@@ -241,8 +246,11 @@ def get_positions() -> list[PositionRow]:
 
 @app.post("/positions", response_model=list[PositionRow])
 def add_position(pos: PositionIn) -> list[PositionRow]:
+    ticker = pos.ticker.upper().strip()
+    if not ticker:
+        raise HTTPException(status_code=422, detail="ticker vazio")
     conn = _open_writable()
-    store.set_position(conn, pos.ticker.upper().strip(), pos.qty)
+    store.set_position(conn, ticker, pos.qty)
     conn.commit()
     rows = _enrich_positions(conn)
     conn.close()
@@ -321,7 +329,7 @@ def history(ticker: str, window: int = 21) -> HistoryResponse:
 
 
 @app.get("/predict/{ticker}")
-def predict(ticker: str, horizon: int = 30) -> dict:
+def predict(ticker: str, horizon: int = Query(30, gt=0, le=3650)) -> dict:
     """Predição calibrada: σ forecast + densidade física (POP/quantis) + regime + calibração.
 
     Tudo sobre o dado real do store; honesto quando o histórico é curto (sem fabricar).
@@ -341,7 +349,8 @@ def predict(ticker: str, horizon: int = 30) -> dict:
 
 
 @app.get("/strategies/{ticker}")
-def strategies(ticker: str, capital: float = 20000.0, prazo: int = 30, visao: str = "alta") -> dict:
+def strategies(ticker: str, capital: float = Query(20000.0, gt=0, le=1e12),
+               prazo: int = Query(30, gt=0, le=3650), visao: str = "alta") -> dict:
     """Consultor de estratégias: catálogo de estruturas avaliadas por POP + valor esperado.
 
     ``capital`` = orçamento de risco; ``visao`` ∈ {alta, baixa, neutro, renda}. Análise sobre
@@ -362,7 +371,7 @@ def strategies(ticker: str, capital: float = 20000.0, prazo: int = 30, visao: st
 
 
 @app.get("/edge/{ticker}")
-def edge(ticker: str, horizon: int = 30) -> dict:
+def edge(ticker: str, horizon: int = Query(30, gt=0, le=3650)) -> dict:
     """Mapa de Prêmio: prob. RISCO-NEUTRA (mercado) vs FÍSICA calibrada, por strike — o diferencial.
 
     Mostra onde e por quanto o mercado sobrevaloriza/subvaloriza cada strike vs a nossa densidade
@@ -383,7 +392,7 @@ def edge(ticker: str, horizon: int = 30) -> dict:
 
 
 @app.get("/kernel/{ticker}")
-def kernel(ticker: str, horizon: int = 30) -> dict:
+def kernel(ticker: str, horizon: int = Query(30, gt=0, le=3650)) -> dict:
     """Pricing kernel empírico M(S)=q/p — o SDF por nome (a forma teoricamente correta do Edge Map).
 
     O preço de estado por unidade de probabilidade: onde o mercado paga prêmio de risco. Só o ATLAS
@@ -404,11 +413,11 @@ def kernel(ticker: str, horizon: int = 30) -> dict:
 
 
 @app.get("/fair-iv/{ticker}")
-def fair_iv(ticker: str, horizon: int = 30) -> dict:
+def fair_iv(ticker: str, horizon: int = Query(30, gt=0, le=3650)) -> dict:
     """Fair IV: a smile justa pela nossa vol física vs a smile de mercado — o VRP por strike em vol points.
 
-    A língua do trader: quantos pontos de vol o mercado cobra acima do justo, por strike, e onde está a
-    maior oportunidade. Honesto: recusa quando a smile de mercado não é confiável.
+    A língua do trader: quantos pontos de vol o mercado cobra acima do justo, decompondo em nível (VRP)
+    e prêmio de skew. Honesto: recusa quando a smile de mercado não é confiável.
     """
     ticker = ticker.upper()
     conn = _require_conn()
@@ -454,18 +463,20 @@ def edge_backtest(ticker: str) -> dict:
     universe: list[dict] = []
     for nm in names:
         ohlc = store.price_history(conn, nm, limit=400)
-        iv_hist = store.iv_history(conn, nm, limit=400)
-        if not ohlc or not iv_hist:
+        cs = store.close_series(conn, nm, limit=400)          # (date, close) — datado, alinhado ao ohlc
+        ivs = store.iv_series(conn, nm, limit=400)             # (date, iv) — datado, com buracos internos
+        if not ohlc or not cs or not ivs:
             continue
-        universe.append({"ticker": nm, "ohlc": ohlc, "closes": [b[3] for b in ohlc], "iv_history": iv_hist})
+        universe.append({"ticker": nm, "ohlc": ohlc, "closes": [c for _, c in cs],
+                         "dates": [d for d, _ in cs], "iv_series": ivs})
     asof = store.get_meta(conn, "asof")
     conn.close()
     return build_edge_backtest(ticker=ticker, universe=universe, asof=asof)
 
 
 @app.get("/decision/{ticker}")
-def decision(ticker: str, visao: str = "alta", capital: float = 20000.0,
-             prazo: int = 30, perfil: str = "moderado") -> dict:
+def decision(ticker: str, visao: str = "alta", capital: float = Query(20000.0, gt=0, le=1e12),
+             prazo: int = Query(30, gt=0, le=3650), perfil: str = "moderado") -> dict:
     """Cartão de Decisão: a síntese que vira decisão — o quê, por quê, quanto, com que confiança.
 
     Sintetiza todos os sinais do motor num veredicto por estrutura, com sizing Kelly+CVaR sob
@@ -483,9 +494,11 @@ def decision(ticker: str, visao: str = "alta", capital: float = 20000.0,
     universe: list[dict] = []
     for nm in dict.fromkeys([ticker, *_BACKTEST_UNIVERSE]):
         o = store.price_history(conn, nm, limit=400)
-        iv = store.iv_history(conn, nm, limit=400)
-        if o and iv:
-            universe.append({"ticker": nm, "ohlc": o, "closes": [b[3] for b in o], "iv_history": iv})
+        cs = store.close_series(conn, nm, limit=400)
+        ivs = store.iv_series(conn, nm, limit=400)
+        if o and cs and ivs:
+            universe.append({"ticker": nm, "ohlc": o, "closes": [c for _, c in cs],
+                             "dates": [d for d, _ in cs], "iv_series": ivs})
     conn.close()
     bt = build_edge_backtest(ticker=ticker, universe=universe, asof=asof)
     dsr = bt.get("deflated_sharpe") if bt.get("available") else None

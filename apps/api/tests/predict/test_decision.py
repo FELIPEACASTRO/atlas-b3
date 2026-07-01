@@ -1,5 +1,5 @@
 """Camada de decisão: sizing Kelly+CVaR sob incerteza, score de confiança, abstenção honesta."""
-from atlas_api.predict.decision import _confidence, _kelly_lots, _verdict
+from atlas_api.predict.decision import _confidence, _kelly_lots, _verdict, reactivate_hint
 
 
 def test_kelly_zero_when_no_growth_edge():
@@ -34,6 +34,18 @@ def test_confidence_geomean_and_pit_break_gate():
                      backtest_dsr=1.0, agree_frac=1.0)
     assert c2["factors"]["calibracao"] == 0.0
     assert c2["score"] < c["score"]
+
+
+def test_reactivate_hint_turns_the_no_into_a_next_step():
+    # OPERAR não precisa de gatilho de retorno
+    assert reactivate_hint(verdict="OPERAR", lots=5, factors={}, is_abstained=False) is None
+    # abstenção → aponta a calibração (PIT)
+    h_abs = reactivate_hint(verdict="EVITAR", lots=0, factors={}, is_abstained=True)
+    assert h_abs and "PIT" in h_abs
+    # sem edge (0 lotes) + sinais divergentes → diz o que precisa mudar
+    h = reactivate_hint(verdict="OBSERVAR", lots=0,
+                        factors={"concordancia": 0.5, "calibracao": 0.5, "backtest": 0.8}, is_abstained=False)
+    assert h and "VRP" in h and "convergirem" in h
 
 
 def test_verdict_bands_and_abstention():

@@ -10,3 +10,6 @@ data_cache/
 *.egg-info/
 CHAVE.txt
 kaggle.json
+
+# Claude Code local config
+.claude/

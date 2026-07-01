@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SizingOut(BaseModel):
@@ -69,7 +69,7 @@ class ChainRow(BaseModel):
 
 class PositionIn(BaseModel):
     ticker: str
-    qty: float
+    qty: float = Field(allow_inf_nan=False)   # rejeita NaN/inf antes de tocar o banco (422, não 500 pós-commit)
 
 
 class PositionRow(BaseModel):

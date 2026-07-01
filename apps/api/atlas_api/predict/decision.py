@@ -18,13 +18,16 @@ import math
 
 import numpy as np
 
+from .distribution import physical_density
+from .edge import premium_map
 from .fair_iv import fair_iv_smile
 from .kernel import pricing_kernel
+from .strategies import CVAR_BUDGET
 
-# Perfis: KELLY_CAP = meio-Kelly (parâmetros estimados de 1 ano têm drawdown violento em full-Kelly).
-# CVAR_BUDGET = fração do capital tolerada como PERDA ESPERADA na cauda 5%, por perfil (o teto de cauda).
+# KELLY_CAP = meio-Kelly (parâmetros estimados de 1 ano têm drawdown violento em full-Kelly).
+# CVAR_BUDGET (o teto de cauda por perfil) vem de strategies.py — fonte ÚNICA compartilhada com o
+# consultor, para as duas telas NÃO se contradizerem no sizing.
 KELLY_CAP = 0.5
-_CVAR_BUDGET = {"conservador": 0.02, "moderado": 0.05, "agressivo": 0.10}
 
 
 def _sign(x: float, tol: float = 1e-4) -> int:
@@ -39,25 +42,27 @@ def _asset_signals(*, spot, chain, asof, prazo, dens, mvp, regime, fit_smile) ->
     """
     sig: dict[str, int] = {}
     sig["vrp"] = _sign(mvp.get("vrp") or 0.0)                       # mercado − física
-    bias = (regime or {}).get("bias", "")
-    sig["regime"] = 1 if "vend" in bias else -1 if ("compr" in bias or "debit" in bias) else 0
+    # mapeia pelo rótulo CANÔNICO do regime, não por substring do texto humano ("vend" casa dentro de
+    # "evitar VENDA a descoberto" — regime defensivo que virava sinal de venda; bug medido em 4/12 nomes).
+    reg_label = (regime or {}).get("regime", "")
+    sig["regime"] = {"vender prêmio": 1, "comprar/debit": -1}.get(reg_label, 0)
     fit, dte = fit_smile
     if fit is not None and fit.get("usable"):
         grid = [round(float(x), 4) for x in np.linspace(0.97, 1.03, 5)]  # near-the-money
         forward = fit["forward"]
-        # Edge Map (P_mercado − P_física) no NTM: >0 = mercado sobrevaloriza (vender)
-        from .edge import premium_map
-        emap = premium_map(spot=spot, forward=forward, phys_cdf=dens.logret_cdf,
+        # densidade no MESMO horizonte da smile (dte real do vencimento), não no prazo do input: o kernel
+        # é uma RAZÃO q/p e a largura escala com T, então o T errado INVERTE o sinal (bug medido). Alinha
+        # edge/kernel/fair ao vencimento e às telas /kernel, /edge, /fair-iv (que usam dte).
+        dens_h = physical_density(spot=spot, sigma_iv=dens.sigma, rv=dens.sigma, vrp=0.0, T=dte / 365.0)
+        emap = premium_map(spot=spot, forward=forward, phys_cdf=dens_h.logret_cdf,
                            svi_k=fit["k"], svi_density=fit["density"], moneyness=grid)
-        sig["edge"] = _sign(float(np.mean([r["edge"] for r in emap])))
-        # Pricing Kernel: M>1 no NTM = estado caro (vender)
-        kern = pricing_kernel(spot=spot, forward=forward, phys_pdf=dens.logret_pdf,
+        sig["edge"] = _sign(float(np.mean([r["edge"] for r in emap])))       # >0 = mercado sobrevaloriza (vender)
+        kern = pricing_kernel(spot=spot, forward=forward, phys_pdf=dens_h.logret_pdf,
                               svi_k=fit["k"], svi_density=fit["density"], moneyness=grid)
-        sig["kernel"] = _sign(float(np.mean([r["m"] for r in kern])) - 1.0)
-        # Fair IV: nível (VRP) > 0 = vol cara (vender)
-        fv = fair_iv_smile(spot=spot, forward=forward, phys_vol=dens.sigma, svi_params=fit["params"],
+        sig["kernel"] = _sign(float(np.mean([r["m"] for r in kern])) - 1.0)  # M>1 no NTM = estado caro (vender)
+        fv = fair_iv_smile(spot=spot, forward=forward, phys_vol=dens_h.sigma, svi_params=fit["params"],
                            T=dte / 365.0, moneyness=grid)
-        sig["fair_iv"] = _sign(fv["level_gap"])
+        sig["fair_iv"] = _sign(fv["level_gap"])                              # nível (VRP) > 0 = vol cara (vender)
     present = {k: v for k, v in sig.items() if v != 0}
     if not present:
         return {"signals": sig, "consensus": 0, "agree_frac": 0.5, "n_signals": 0}
@@ -93,7 +98,7 @@ def _confidence(*, cal, health, smile, backtest_dsr, agree_frac) -> dict:
     else:
         c_smile = 0.5                                            # sem smile confiável: só direcional
     c_agree = round(agree_frac, 3)                               # 0.5 (empate) .. 1.0 (unânime)
-    c_backtest = 0.85 if backtest_dsr is None else round(0.5 + 0.5 * float(backtest_dsr), 3)  # gate econômico
+    c_backtest = 0.85 if backtest_dsr is None else round(min(max(0.5 + 0.5 * float(backtest_dsr), 0.0), 1.0), 3)
 
     factors = {"calibracao": round(c_calib, 3), "dados": round(c_data, 3), "smile": c_smile,
                "concordancia": c_agree, "backtest": c_backtest}
@@ -125,18 +130,23 @@ def _kelly_lots(*, card, capital, perfil, size_conf, gate) -> dict:
     if kelly <= 0:
         return {"lots": 0, "kelly_frac": round(kelly, 3), "reason": "Kelly ≤ 0: sem edge de crescimento"}
     n_kelly = kelly * KELLY_CAP * capital / loss_ref            # teto de crescimento (meio-Kelly)
-    n_cvar = _CVAR_BUDGET[perfil] * capital / abs(cvar) if cvar < 0 else n_kelly  # teto de cauda por perfil
-    lots = int(math.floor(min(n_kelly, n_cvar) * size_conf * gate))
+    n_cvar = CVAR_BUDGET[perfil] * capital / loss_ref           # teto de cauda por perfil (SEMPRE ativo)
+    lots = max(int(math.floor(min(n_kelly, n_cvar) * size_conf * gate)), 0)
     binding = "cauda (CVaR)" if n_cvar < n_kelly else "crescimento (Kelly)"
-    return {"lots": max(lots, 0), "kelly_frac": round(kelly, 3), "kelly_used": round(kelly * KELLY_CAP * size_conf * gate, 3),
-            "binding": binding, "cvar_at_risk": round(abs(cvar) * max(lots, 0), 2)}
+    return {"lots": lots, "kelly_frac": round(kelly, 3), "kelly_used": round(kelly * KELLY_CAP * size_conf * gate, 3),
+            "binding": binding, "cvar_at_risk": round(loss_ref * lots, 2)}
 
 
-def _invalidation(*, dens, spot, quantiles, mvp, vol_stance) -> dict:
+def _invalidation(*, dens, spot, quantiles, mvp, vol_stance, thesis) -> dict:
     """Condições que MATAM a tese — da própria densidade e do VRP. A decisão tem prazo de validade."""
     selling = vol_stance == "vender"
-    # invalidação de preço: cauda adversa (p10 p/ tese de alta/venda-de-put; p90 p/ baixa)
-    price_stop = quantiles.get("p10") if mvp else None
+    # invalidação de preço = a cauda ADVERSA à tese direcional: baixa → p90 (alta); alta/renda → p10 (queda).
+    # Estrutura NEUTRA (straddle/strangle comprado) é invalidada por FICAR DE LADO, não por cruzar um
+    # preço → sem stop de cauda única (senão o rótulo engana).
+    if not mvp or thesis == "neutro":
+        price_stop = None
+    else:
+        price_stop = quantiles.get("p90") if thesis == "baixa" else quantiles.get("p10")
     iv, phys = mvp.get("iv"), mvp.get("physical")
     vol_stop = None
     if iv is not None and phys is not None:
@@ -144,6 +154,27 @@ def _invalidation(*, dens, spot, quantiles, mvp, vol_stance) -> dict:
             else ("sair se a IV subir muito acima da física (~%.0f%%)" % (phys * 100))
     return {"price_stop": price_stop, "vol_stop": vol_stop, "days_stop": 21,
             "calib_stop": "reavalie se o monitor de calibração (PIT) quebrar"}
+
+
+def reactivate_hint(*, verdict: str, lots: int, factors: dict, is_abstained: bool) -> str | None:
+    """O gatilho de RETORNO: o que faria este 'não' virar 'opere'. Transforma a abstenção honesta
+    num próximo passo acionável (o usuário confia no 'não' porque sabe o que observar para o 'sim')."""
+    if verdict == "OPERAR":
+        return None
+    if is_abstained:
+        return "Reavalie quando a densidade recalibrar — o monitor de PIT precisa voltar acima de 0.05."
+    reasons: list[str] = []
+    if lots <= 0:                                   # sem edge de crescimento (Kelly/EV≤0)
+        reasons.append("o prêmio de vol (VRP) subir — a IV precisa ficar mais cara vs a nossa física")
+    if factors.get("concordancia", 1.0) < 0.7:
+        reasons.append("os sinais convergirem para o mesmo lado")
+    if factors.get("calibracao", 1.0) < 0.6:
+        reasons.append("a calibração da densidade melhorar")
+    if factors.get("backtest", 1.0) < 0.9:
+        reasons.append("o edge confirmar no backtest com mais histórico")
+    if not reasons:
+        return "Reavalie se a confiança subir."
+    return "Vira operável se " + "; ".join(reasons) + "."
 
 
 def _verdict(score: float, lots: int, abstain: bool) -> str:

@@ -37,25 +37,23 @@ def sharpe(pnl, *, annualize: bool = True) -> float:
     return float(a.mean() / sd * (_ANN if annualize else 1.0))   # tol: variância ~0 (soma) → 0, não explode
 
 
-def vol_premium_pnl(iv_history: list[float], rv: list[float], closes: list[float],
+def vol_premium_pnl(iv_by_date: dict, dates: list[str], rv: list[float], closes: list[float],
                     *, window: int, min_train: int = 30) -> tuple[list[float], list[float]]:
     """P&L diário de vender vol: CONDICIONAL (só quando o físico diz cara, VRP>0) vs INCONDICIONAL.
 
-    Alinha ``iv_history`` (grade diária dos closes) à série ``rv`` (que termina ``window-1`` barras à
-    frente). Retorna ``(pnl_condicional, pnl_incondicional)`` em unidades de vol anualizada.
+    Junta IV↔close por DATA (``iv_by_date[dates[day]]``), não por posição: a ``iv_daily`` tem buracos
+    INTERNOS (100/167 nomes) que desalinhariam o IV do dia com o close de outro dia. Dias sem IV são
+    pulados honestamente. ``dates``/``closes`` vêm da mesma fonte (prices_daily, alinhados ao ``rv``).
+    Retorna ``(pnl_condicional, pnl_incondicional)`` em unidades de vol anualizada.
     """
     pnl_c: list[float] = []
     pnl_u: list[float] = []
-    offset = len(closes) - len(iv_history)               # iv e closes terminam no asof; iv pode faltar no começo
     for i in range(min_train, len(rv)):
-        day = i + window - 1                             # índice em closes alinhado a rv[i]
-        if day + 1 >= len(closes):
+        day = i + window - 1                             # índice em closes/dates alinhado a rv[i]
+        if day + 1 >= len(closes) or day >= len(dates):
             break
-        iv_idx = day - offset                            # alinha iv à direita (mesma data que closes[day])
-        if iv_idx < 0 or iv_idx >= len(iv_history):
-            continue
-        iv_t = iv_history[iv_idx]
-        if not (iv_t and iv_t > 0) or closes[day] <= 0 or closes[day + 1] <= 0:
+        iv_t = iv_by_date.get(dates[day])                # join por DATA (pula o dia se a IV falta)
+        if not iv_t or iv_t <= 0 or closes[day] <= 0 or closes[day + 1] <= 0:
             continue
         fc = forecast_har(fit_har(rv[:i]), rv[:i])       # previsão física point-in-time (sem look-ahead)
         if not (fc > 0):
@@ -99,7 +97,7 @@ def run_edge_backtest(universe: list[dict], *, window: int, min_train: int = 30,
     series_c: list[list[float]] = []
     series_u: list[list[float]] = []
     for u in universe:
-        pc, pu = vol_premium_pnl(u["iv_history"], u["rv"], u["closes"], window=window, min_train=min_train)
+        pc, pu = vol_premium_pnl(u["iv_by_date"], u["dates"], u["rv"], u["closes"], window=window, min_train=min_train)
         if len(pc) < min_days:
             continue
         n_trades = int(sum(1 for x in pc if x != 0.0))
