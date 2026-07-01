@@ -38,6 +38,7 @@ export function OptionsChain() {
   const [rows, setRows] = useState<Row[]>([]);
   const [prov, setProv] = useState("");
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
   const [kind, setKind] = useState<"all" | "call" | "put">("all");
   const [openOpt, setOpenOpt] = useState<string | null>(null);
 
@@ -56,17 +57,22 @@ export function OptionsChain() {
     let alive = true;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reset loading when the ticker changes
     setLoading(true);
+    setErr("");
     fetch(`${API}/chain/${ticker}`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(r.status === 503 ? "Terminal sem dados de mercado carregados." : `Falha ao carregar a cadeia (erro ${r.status}).`);
+        return r.json();
+      })
       .then((d: Row[]) => {
         if (!alive) return;
         setRows(Array.isArray(d) ? d : []);
         setProv(d?.[0]?.provenance ?? "");
         setLoading(false);
       })
-      .catch(() => {
+      .catch((e) => {
         if (alive) {
           setRows([]);
+          setErr(e instanceof Error ? e.message : "falha na conexão com o terminal");
           setLoading(false);
         }
       });
@@ -124,6 +130,8 @@ export function OptionsChain() {
 
       {loading ? (
         <p className="text-[13px] text-[var(--text-tertiary)]">carregando cadeia…</p>
+      ) : err ? (
+        <p className="text-[13px]" style={{ color: "var(--down)" }}>{err}</p>
       ) : rows.length === 0 ? (
         <p className="text-[13px] text-[var(--text-secondary)]">
           Sem cadeia para {ticker}. Rode a ingestão e tente um subjacente líquido (PETR4, VALE3, BOVA11).
