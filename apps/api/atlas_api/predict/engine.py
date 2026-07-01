@@ -23,6 +23,7 @@ from .decision import (
     _kelly_lots,
     _verdict,
     _why,
+    reactivate_hint,
 )
 from .edge import premium_map
 from .edge_backtest import run_edge_backtest, vol_premium_pnl
@@ -562,6 +563,8 @@ def build_decision(
             "name": s["name"], "thesis": s["thesis"], "defined_risk": s["defined_risk"],
             "vol_stance": s.get("vol_stance"), "legs": s["legs"], "breakevens": s["breakevens"],
             "verdict": verdict, "decision_score": card_score,
+            "reactivate": reactivate_hint(verdict=verdict, lots=sizing["lots"],
+                                          factors=conf["factors"], is_abstained=is_abstained),
             "sizing": sizing,
             "economics": {"pop": s["pop"], "ev_lot": s["per_lot"]["ev"], "cvar_lot": s["per_lot"]["cvar"],
                           "max_loss_lot": s["per_lot"]["max_loss"], "max_gain_lot": s["per_lot"]["max_gain"]},

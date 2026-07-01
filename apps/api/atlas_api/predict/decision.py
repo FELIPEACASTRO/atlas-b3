@@ -156,6 +156,27 @@ def _invalidation(*, dens, spot, quantiles, mvp, vol_stance, thesis) -> dict:
             "calib_stop": "reavalie se o monitor de calibração (PIT) quebrar"}
 
 
+def reactivate_hint(*, verdict: str, lots: int, factors: dict, is_abstained: bool) -> str | None:
+    """O gatilho de RETORNO: o que faria este 'não' virar 'opere'. Transforma a abstenção honesta
+    num próximo passo acionável (o usuário confia no 'não' porque sabe o que observar para o 'sim')."""
+    if verdict == "OPERAR":
+        return None
+    if is_abstained:
+        return "Reavalie quando a densidade recalibrar — o monitor de PIT precisa voltar acima de 0.05."
+    reasons: list[str] = []
+    if lots <= 0:                                   # sem edge de crescimento (Kelly/EV≤0)
+        reasons.append("o prêmio de vol (VRP) subir — a IV precisa ficar mais cara vs a nossa física")
+    if factors.get("concordancia", 1.0) < 0.7:
+        reasons.append("os sinais convergirem para o mesmo lado")
+    if factors.get("calibracao", 1.0) < 0.6:
+        reasons.append("a calibração da densidade melhorar")
+    if factors.get("backtest", 1.0) < 0.9:
+        reasons.append("o edge confirmar no backtest com mais histórico")
+    if not reasons:
+        return "Reavalie se a confiança subir."
+    return "Vira operável se " + "; ".join(reasons) + "."
+
+
 def _verdict(score: float, lots: int, abstain: bool) -> str:
     if abstain or lots <= 0:
         return "EVITAR" if abstain else "OBSERVAR"

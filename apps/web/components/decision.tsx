@@ -10,6 +10,7 @@ type Leg = { kind: string; action: string; strike: number; premium: number };
 type Card = {
   name: string; thesis: string; defined_risk: boolean; vol_stance: string; legs: Leg[]; breakevens: number[];
   verdict: string; decision_score: number; sizing: Sizing; economics: Econ; why: Why; invalidation: Inval;
+  reactivate?: string | null;
 };
 type Conf = { score: number; band: string; factors: Record<string, number> };
 type Resp = {
@@ -140,7 +141,7 @@ export function Decision() {
           </div>
           {d.abstain?.is_abstained ? (
             <div className="mt-3 rounded-lg px-3 py-2 text-[12px]" style={{ background: "color-mix(in oklch, var(--down) 12%, transparent)", color: "var(--down)" }}>
-              <b>Fique de fora.</b> {d.abstain.reason}. Nenhuma estrutura é recomendada — a decisão honesta é não operar.
+              <b>Fique de fora.</b> {d.abstain.reason}. Nenhuma estrutura é recomendada — a decisão honesta é não operar. <span style={{ opacity: 0.85 }}>↻ Reavalie quando a densidade recalibrar (o monitor de PIT precisa voltar acima de 0.05).</span>
             </div>
           ) : null}
         </div>
@@ -186,6 +187,13 @@ function DecisionCard({ c, top }: { c: Card; top: boolean }) {
           {s.binding ? <span className="text-[10px] text-[var(--text-tertiary)]">limitado por {s.binding}</span> : null}
         </> : <span className="text-[10px] text-[var(--text-tertiary)]">{s.reason ?? "Kelly ≤ 0: sem edge de crescimento"}</span>}
       </div>
+
+      {/* gatilho de retorno: o que faria este "não" virar "opere" */}
+      {c.reactivate ? (
+        <div className="mb-1.5 flex items-start gap-1.5 text-[11px]" style={{ color: "var(--accent)" }}>
+          <span aria-hidden>↻</span><span>{c.reactivate}</span>
+        </div>
+      ) : null}
 
       {/* pernas */}
       <div className="mb-1.5 flex flex-wrap gap-1.5">
