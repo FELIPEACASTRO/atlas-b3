@@ -16,31 +16,23 @@ def test_health():
     assert r.json()["status"] == "ok"
 
 
-def test_briefing_sample_three_profiles_and_provenance():
-    r = client.get("/briefing/sample")
-    assert r.status_code == 200
-    d = r.json()
-    assert set(d["sizing"]) == {"conservador", "moderado", "agressivo"}
-    assert len(d["case_against"]) >= 1  # honesty: never one-sided
-    assert d["provenance"] and d["asof"]
+def test_no_synthetic_sample_endpoint(monkeypatch):
+    # There is no special /briefing/sample anymore; it falls through to the real
+    # {underlying} route, which has no data without a store -> honest 503.
+    monkeypatch.delenv("ATLAS_DB", raising=False)
+    assert client.get("/briefing/sample").status_code == 503
 
 
-def test_screener_fixture_fallback_has_provenance(monkeypatch):
+def test_screener_without_store_returns_503(monkeypatch):
     monkeypatch.delenv("ATLAS_DB", raising=False)
     r = client.get("/screener")
-    assert r.status_code == 200
-    rows = r.json()
-    assert len(rows) >= 1
-    assert all(row["provenance"] and row["asof"] for row in rows)
+    assert r.status_code == 503  # no store -> honest error, never fixture rows
 
 
-def test_chain_fixture_fallback_has_iv_and_greeks(monkeypatch):
+def test_chain_without_store_returns_503(monkeypatch):
     monkeypatch.delenv("ATLAS_DB", raising=False)
     r = client.get("/chain/PETR4")
-    assert r.status_code == 200
-    rows = r.json()
-    assert len(rows) >= 1
-    assert all(row["iv"] is not None and row["delta"] is not None for row in rows)
+    assert r.status_code == 503  # no synthetic Black-Scholes chain anymore
 
 
 def test_screener_from_real_store(tmp_path, monkeypatch):
@@ -68,13 +60,12 @@ def test_screener_handles_null_ultimo(tmp_path, monkeypatch):
     assert r.json()[0]["ultimo"] is None
 
 
-def test_corrupt_db_falls_back_to_fixture(tmp_path, monkeypatch):
+def test_corrupt_db_returns_503_not_fixture(tmp_path, monkeypatch):
     bad = tmp_path / "bad.db"
     bad.write_text("not a sqlite file")
     monkeypatch.setenv("ATLAS_DB", str(bad))
     r = client.get("/screener")
-    assert r.status_code == 200
-    assert any(row["provenance"].startswith("fixture") for row in r.json())
+    assert r.status_code == 503  # corrupt store -> honest error, never fabricated rows
 
 
 def _seed_real_store(db: str) -> None:
@@ -119,6 +110,41 @@ def test_briefing_by_ticker_is_real(tmp_path, monkeypatch):
     assert d["ticker"].startswith("PETR")
     assert set(d["sizing"]) == {"conservador", "moderado", "agressivo"}
     assert "COTAHIST EOD" in d["provenance"]  # built from real data, not the fixture sample
+
+
+def _seed_briefing_calls(db, near_last, far_last):
+    from atlas_api.data import store
+
+    conn = store.connect(db)
+    store.upsert_prices(conn, [
+        ("PETR4", "2024-01-02", 37.4, 37.9, 37.4, 37.8),
+        ("PETR4", "2024-01-03", 37.8, 38.2, 37.6, 38.0),
+        ("PETR4", "2024-01-04", 38.0, 38.5, 37.9, 38.3),
+    ])
+    store.insert_instruments(conn, [("PETR4", "acao", 38.3, 1.2, 1e9, 0.30, "rico", None, "2024-01-04")])
+    store.insert_options(conn, [
+        ("PETR4", "PETRA38", "call", 38.0, "2024-02-16", near_last, 0.30, 0.55, 0.04, 1.5, -0.03, "2024-01-04"),
+        ("PETR4", "PETRA40", "call", 40.0, "2024-02-16", far_last, 0.32, 0.30, 0.03, 1.2, -0.02, "2024-01-04"),
+    ])
+    store.set_meta(conn, "asof", "2024-01-04")
+    conn.commit()
+    conn.close()
+
+
+def test_briefing_null_last_does_not_500(tmp_path, monkeypatch):
+    db = str(tmp_path / "bn.db")
+    _seed_briefing_calls(db, near_last=None, far_last=0.40)  # near leg has no traded price
+    monkeypatch.setenv("ATLAS_DB", db)
+    r = client.get("/briefing/PETR4")
+    assert r.status_code == 422  # null-last call filtered -> insufficient, never a 500 crash
+
+
+def test_briefing_rejects_inverted_credit(tmp_path, monkeypatch):
+    db = str(tmp_path / "bi.db")
+    _seed_briefing_calls(db, near_last=0.40, far_last=1.10)  # lower strike cheaper -> credit < 0
+    monkeypatch.setenv("ATLAS_DB", db)
+    r = client.get("/briefing/PETR4")
+    assert r.status_code == 422  # not a real credit spread -> refuse, don't mislabel
 
 
 def test_positions_crud_and_portfolio_risk(tmp_path, monkeypatch):

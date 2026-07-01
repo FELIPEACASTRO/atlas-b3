@@ -7,6 +7,11 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
+# chat "modo IA ao vivo" — sem isto o /chat roda no modo simples (determinístico)
+chat = ["anthropic"]
+# motor de predição de vol (módulo predict/) — ISOLADO do core, que segue pure-stdlib.
+# o deploy do túnel (pricing/api) não usa isto; só os endpoints/cálculos de predição.
+predict = ["numpy>=2.5", "scipy>=1.18"]
 
 [tool.ruff]
 line-length = 100

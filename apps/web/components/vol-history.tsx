@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 type Pt = { date: string; iv: number | null; rv: number | null };
 type Hist = { ticker: string; points: Pt[]; iv_rank: number | null; provenance: string };
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 const pct = (v: number | null) => (v == null ? "—" : `${(v * 100).toFixed(0)}%`);
 
 export function VolHistory({ ticker }: { ticker: string }) {
@@ -47,6 +47,9 @@ export function VolHistory({ ticker }: { ticker: string }) {
   const gridYs = [yLo + (yHi - yLo) * 0.25, yLo + (yHi - yLo) * 0.5, yLo + (yHi - yLo) * 0.75];
   const rank = h.iv_rank;
   const rankColor = rank == null ? "var(--text-tertiary)" : rank >= 50 ? "var(--accent)" : "var(--up)";
+  const ivNow = last.iv, rvNow = last.rv;
+  const volCara = ivNow != null && rvNow != null ? ivNow >= rvNow : null;
+  const rankTxt = rank == null ? null : rank < 25 ? "entre as mais baratas" : rank > 75 ? "entre as mais caras" : "no meio da faixa";
 
   return (
     <div className="mb-4 rounded-xl border border-[var(--border-subtle)] p-4">
@@ -63,6 +66,16 @@ export function VolHistory({ ticker }: { ticker: string }) {
             </span>
           ) : null}
         </div>
+      </div>
+      <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-[var(--text-tertiary)]">
+        <span className="flex items-center gap-1.5">
+          <i className="inline-block h-1.5 w-3 rounded-full" style={{ background: "var(--accent)" }} />
+          <span><b style={{ color: "var(--text-secondary)" }}>IV implícita</b> — o quanto o mercado <b>espera</b> que o ativo oscile (lido do preço das opções)</span>
+        </span>
+        <span className="flex items-center gap-1.5">
+          <i className="inline-block h-1.5 w-3 rounded-full" style={{ background: "var(--text-secondary)" }} />
+          <span><b style={{ color: "var(--text-secondary)" }}>RV realizada</b> — o quanto o ativo <b>de fato</b> oscilou (do preço histórico)</span>
+        </span>
       </div>
       <div className="relative">
         <svg
@@ -117,8 +130,21 @@ export function VolHistory({ ticker }: { ticker: string }) {
           </div>
         ) : null}
       </div>
-      <div className="mt-1 text-[11px] text-[var(--text-tertiary)]">
-        IV Rank = posição da IV de hoje na faixa min–max da janela · fonte: {h.provenance}
+      {volCara != null ? (
+        <div className="mt-2 rounded-lg px-3 py-2 text-[11.5px] leading-relaxed"
+          style={{ background: "color-mix(in oklch, var(--accent) 7%, transparent)", color: "var(--text-secondary)" }}>
+          <b style={{ color: "var(--text-primary)" }}>O que isso diz: </b>
+          a IV ({pct(ivNow)}) está {volCara ? "acima" : "abaixo"} da RV ({pct(rvNow)}) →{" "}
+          {volCara ? (
+            <>vol <b style={{ color: "var(--accent)" }}>cara</b> — o mercado embute mais &ldquo;medo&rdquo; do que o ativo realmente oscilou. O prêmio das opções está &ldquo;gordo&rdquo;, o que tende a favorecer quem <b>vende/lança</b> opções.</>
+          ) : (
+            <>vol <b style={{ color: "var(--up)" }}>barata</b> — as opções estão baratas frente ao que o ativo entregou, o que tende a favorecer quem <b>compra</b> opções.</>
+          )}
+          {rank != null ? <> O <b>IV Rank {rank.toFixed(0)}/100</b> mostra que a vol de hoje está {rankTxt} do último ano (0 = a mais barata que já esteve, 100 = a mais cara).</> : null}
+        </div>
+      ) : null}
+      <div className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
+        passe o mouse no gráfico para ver IV e RV de cada dia · fonte: {h.provenance} · fechamento (EOD), não é tempo real
       </div>
     </div>
   );

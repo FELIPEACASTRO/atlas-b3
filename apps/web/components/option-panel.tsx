@@ -15,7 +15,7 @@ type Analysis = {
   gregas: Greek[]; veredito: string; provenance: string;
 };
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 const pct = (v: number | null) => (v == null ? "—" : `${(v * 100).toFixed(0)}%`);
 const brl = (v: number | null) => (v == null ? "—" : v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }));
 const mnyColor = (m: string) => (m === "ITM" ? "var(--up)" : m === "OTM" ? "var(--text-tertiary)" : "var(--accent)");
@@ -35,6 +35,7 @@ export function OptionPanel({ ticker, onClose }: { ticker: string; onClose: () =
 
   useEffect(() => {
     let alive = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset panel when the ticker changes
     setA(null); setErr("");
     fetch(`${API}/option/${ticker}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(r)))

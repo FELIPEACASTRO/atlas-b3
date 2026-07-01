@@ -8,6 +8,7 @@ import {
   CandlestickChart,
   Briefcase,
   UserSearch,
+  MessageSquare,
   Search,
   CornerDownLeft,
   TrendingUp,
@@ -23,10 +24,11 @@ type Cmd = {
 
 const MODULES: Cmd[] = [
   { id: "radar", label: "Radar", hint: "panorama do mercado", icon: Radar, run: (r) => r.push("/") },
-  { id: "screener", label: "Screener", hint: "filtrar ativos por IV / VRP", icon: Filter, run: (r) => r.push("/") },
+  { id: "screener", label: "Screener", hint: "filtrar ativos por IV / VRP", icon: Filter, run: (r) => r.push("/screener") },
   { id: "opcoes", label: "Opções", hint: "cadeia + volatilidade", icon: CandlestickChart, run: (r) => r.push("/opcoes") },
   { id: "carteira", label: "Carteira", hint: "risco e stress consolidados", icon: Briefcase, run: (r) => r.push("/carteira") },
   { id: "analista", label: "Analista", hint: "briefing honesto", icon: UserSearch, run: (r) => r.push("/analista") },
+  { id: "chat", label: "Chat com o ATLAS", hint: "pergunte sobre opções e ações", icon: MessageSquare, run: (r) => r.push("/chat") },
 ];
 
 export function CommandPalette() {
@@ -74,7 +76,6 @@ export function CommandPalette() {
   useEffect(() => {
     if (open) setTimeout(() => inputRef.current?.focus(), 0);
   }, [open]);
-  useEffect(() => { setSel(0); }, [q]);
 
   if (!open) return null;
 
@@ -107,7 +108,7 @@ export function CommandPalette() {
           <input
             ref={inputRef}
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) => { setQ(e.target.value); setSel(0); }}
             onKeyDown={(e) => {
               if (e.key === "ArrowDown") { e.preventDefault(); setSel((s) => Math.min(s + 1, commands.length - 1)); }
               else if (e.key === "ArrowUp") { e.preventDefault(); setSel((s) => Math.max(s - 1, 0)); }

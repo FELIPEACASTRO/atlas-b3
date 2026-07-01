@@ -6,7 +6,7 @@ type Expiry = { venc: string; dte: number; atm_iv: number };
 type Point = { venc: string; strike: number; moneyness: number; iv: number };
 type Surf = { ticker: string; spot: number | null; expiries: Expiry[]; points: Point[]; provenance: string };
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 const EDGES = [0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.2]; // 8 moneyness buckets
 // thermal ramp: low IV cool (blue), high IV hot (red) — the vol-surface convention
 const thermal = (t: number) => `oklch(0.66 0.15 ${250 - Math.max(0, Math.min(1, t)) * 225})`;
@@ -49,12 +49,18 @@ export function IvSurface({ ticker }: { ticker: string }) {
 
   return (
     <div className="mb-4 rounded-xl border border-[var(--border-subtle)] p-4">
-      <div className="mb-3 text-[12px] text-[var(--text-secondary)]">
+      <div className="mb-1 text-[12px] text-[var(--text-secondary)]">
         Superfície de volatilidade — IV por <span style={{ color: "var(--text-primary)" }}>moneyness</span> × <span style={{ color: "var(--text-primary)" }}>vencimento</span>
+      </div>
+      <div className="mb-3 text-[11px] leading-relaxed text-[var(--text-tertiary)]">
+        Mostra <b style={{ color: "var(--text-secondary)" }}>onde a volatilidade está mais cara ou mais barata</b> — por prazo e por strike. Ajuda a escolher a opção certa: vol <b style={{ color: "var(--accent)" }}>cara</b> (quente) costuma favorecer quem <b>vende</b> prêmio; vol <b style={{ color: "#7FB6F0" }}>barata</b> (fria), quem <b>compra</b>.
       </div>
       <div className="grid gap-5 lg:grid-cols-[300px_1fr]">
         <div>
-          <div className="mb-1 text-[11px] text-[var(--text-tertiary)]">Estrutura a termo (ATM IV vs prazo)</div>
+          <div className="text-[11px] text-[var(--text-secondary)]">Estrutura a termo</div>
+          <div className="mb-1.5 text-[10px] leading-snug text-[var(--text-tertiary)]">
+            Como a IV no dinheiro (ATM) muda do vencimento curto (esq.) ao longo (dir.). Subindo = mercado espera mais agitação à frente (balanço, evento); descendo = incerteza concentrada no curto prazo.
+          </div>
           <svg viewBox={`0 0 ${tW} ${tH}`} className="w-full" style={{ height: "auto" }}>
             {[0.25, 0.5, 0.75].map((f, i) => {
               const v = tLo + (tHi - tLo) * f;
@@ -73,7 +79,10 @@ export function IvSurface({ ticker }: { ticker: string }) {
         </div>
 
         <div>
-          <div className="mb-1 text-[11px] text-[var(--text-tertiary)]">Smile × prazo · cor = IV (frio→quente)</div>
+          <div className="text-[11px] text-[var(--text-secondary)]">Mapa de calor — IV por strike × prazo</div>
+          <div className="mb-1.5 text-[10px] leading-snug text-[var(--text-tertiary)]">
+            Cada célula é a IV (%) de uma opção. <b>Linhas</b> = dias até vencer; <b>colunas</b> = K/S (strike ÷ preço; 1,00 = no dinheiro, &lt;1 = abaixo, &gt;1 = acima). Cor <b style={{ color: "var(--accent)" }}>quente</b> = vol cara · <b style={{ color: "#7FB6F0" }}>fria</b> = vol barata.
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full border-separate" style={{ borderSpacing: "2px" }}>
               <thead>
@@ -109,10 +118,15 @@ export function IvSurface({ ticker }: { ticker: string }) {
             </table>
           </div>
           <div className="mt-2 flex items-center gap-2 text-[10px] text-[var(--text-tertiary)]">
-            <span>{(lo * 100).toFixed(0)}%</span>
+            <span>{(lo * 100).toFixed(0)}% (barata)</span>
             <span className="h-2 w-24 rounded" style={{ background: `linear-gradient(90deg, ${thermal(0)}, ${thermal(0.5)}, ${thermal(1)})` }} />
-            <span>{(hi * 100).toFixed(0)}%</span>
-            <span className="ml-auto">K/S = strike ÷ spot · {s.points.length} séries</span>
+            <span>{(hi * 100).toFixed(0)}% (cara)</span>
+            <span className="ml-auto">passe o mouse numa célula para o valor · {s.points.length} séries</span>
+          </div>
+          <div className="mt-2 rounded-lg px-3 py-2 text-[11px] leading-relaxed"
+            style={{ background: "color-mix(in oklch, var(--accent) 7%, transparent)", color: "var(--text-secondary)" }}>
+            <b style={{ color: "var(--text-primary)" }}>Como usar: </b>
+            as células mais <b style={{ color: "var(--accent)" }}>quentes</b> (IV alta) marcam onde o prêmio está mais &ldquo;gordo&rdquo; — terreno de quem <b>vende</b>; as mais <b style={{ color: "#7FB6F0" }}>frias</b> (IV baixa), onde está mais barato para quem <b>compra</b>. Análise, não recomendação — a decisão é sua.
           </div>
         </div>
       </div>

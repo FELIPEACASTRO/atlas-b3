@@ -28,9 +28,10 @@ _MIN_HISTORY = 3  # closes needed for a realized-vol estimate
 _BD_YEAR = 252  # B3 business days/year (annual theta -> per-day)
 
 
-def _is_index(isin: str | None) -> bool:
-    """An index instrument (e.g. IBOV11) carries an 'IND' ISIN — its options are
-    European/cash-settled, not American."""
+def _is_index_option(isin: str | None) -> bool:
+    """An index option (e.g. on the IBOV) carries the 'INDM' segment in ITS OWN
+    ISIN (BRIBOV**INDM**xx) — it is European/cash-settled, not American. Must be
+    checked against the OPTION's isin, not the underlying stock's."""
     return bool(isin) and "INDM" in isin
 
 
@@ -88,7 +89,6 @@ def ingest_cotahist(
         rate = fetch_annual_rate() or _DEFAULT_RATE
     stocks = {qt.ticker: qt for qt in quotes if qt.tipo == "acao"}
     stock_by_isin = {qt.isin: qt.ticker for qt in quotes if qt.tipo == "acao" and qt.isin}
-    index_set = {qt.ticker for qt in stocks.values() if _is_index(qt.isin)}  # e.g. IBOV11
     # real dividend yield per underlying (brapi); COTAHIST has none, so default q=0.
     q_map = q_by_ticker or {}
 
@@ -101,6 +101,7 @@ def ingest_cotahist(
 
     opt_inst_rows: list[tuple] = []
     opt_rows: list[tuple] = []
+    index_underlyings: set[str] = set()  # underlyings that have index options (e.g. the IBOV spot)
     atm: dict[str, tuple[float, float]] = {}  # underlying -> (|strike-spot|, iv) of the ATM option
     vol_by_kind: dict[str, list[float]] = {}  # underlying -> [call_vol, put_vol]
     put_deltas: dict[str, list[tuple[float, float]]] = {}  # underlying -> [(delta, iv), ...]
@@ -111,6 +112,8 @@ def ingest_cotahist(
             continue
         underlying = stock_by_isin.get(qt.isin) or _guess_underlying(qt.ticker, stocks)
         base = stocks.get(underlying) if underlying else None
+        if underlying and _is_index_option(qt.isin):
+            index_underlyings.add(underlying)  # the underlying carries index options -> it's an index
         if underlying and qt.volume:  # flow counts regardless of whether IV is reliable
             vol_by_kind.setdefault(underlying, [0.0, 0.0])[0 if qt.tipo == "call" else 1] += qt.volume
         iv = delta = gamma = vega = theta = None
@@ -124,7 +127,7 @@ def ingest_cotahist(
             q_u = q_map.get(underlying, q)  # real dividend yield when known, else 0
             iv_val, g = _solve_iv_greeks(
                 qt.tipo, qt.preco_ult, base.preco_ult, qt.strike, rate, q_u, T,
-                index=underlying in index_set,
+                index=_is_index_option(qt.isin),  # classify by the OPTION's own ISIN
             )
             if iv_val is not None:
                 iv = round(iv_val, 4)
@@ -163,7 +166,7 @@ def ingest_cotahist(
         sig = classify(atm_iv, rv_val) if (atm_iv is not None and rv_val == rv_val) else None
         iv_col = round(atm_iv, 4) if atm_iv is not None else None
         rank = iv_rank(store.iv_history(conn, qt.ticker), iv_col) if iv_col is not None else None
-        tipo = "indice" if qt.ticker in index_set else "acao"  # IBOV11 is the index, not a stock
+        tipo = "indice" if qt.ticker in index_underlyings else "acao"  # IBOV spot, not a stock
         stock_inst_rows.append((qt.ticker, tipo, qt.preco_ult, var, qt.volume, iv_col, sig, rank, asof_s))
         # labeled option features: variance premium, flow, OTM-put skew
         cvol, pvol = vol_by_kind.get(qt.ticker, [0.0, 0.0])
@@ -211,7 +214,6 @@ def ingest_history(
     q_map = q_by_ticker or {}
     stocks = {qt.ticker: qt for qt in quotes if qt.tipo == "acao"}
     stock_by_isin = {qt.isin: qt.ticker for qt in quotes if qt.tipo == "acao" and qt.isin}
-    index_set = {qt.ticker for qt in stocks.values() if _is_index(qt.isin)}
 
     conn = store.connect(db_path)
     store.upsert_prices(
@@ -239,7 +241,7 @@ def ingest_history(
         T = _years_to_expiry(asof, qt.venc)
         iv, _g = _solve_iv_greeks(
             qt.tipo, qt.preco_ult, base.preco_ult, qt.strike, rate, q_map.get(u, 0.0), T,
-            index=u in index_set,
+            index=_is_index_option(qt.isin),  # classify by the OPTION's own ISIN
         )
         if iv is not None:
             iv_rows.append((u, asof_s, round(iv, 4)))

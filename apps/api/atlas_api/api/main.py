@@ -1,11 +1,12 @@
 """ATLAS API — FastAPI app wiring pricing + analyst + the EOD store.
 
-Serves real COTAHIST-ingested data when ``ATLAS_DB`` points at a populated
-store; otherwise falls back to clearly-labeled fixture data. Honesty holds
-either way: every row carries provenance + asof.
+Serves real COTAHIST-ingested data from the store at ``ATLAS_DB``. There is no
+synthetic/fixture data path: when the store is absent or empty, data endpoints
+return 503 instead of fabricating numbers. Every row carries provenance + asof.
 """
 from __future__ import annotations
 
+import json
 import math
 import os
 import sqlite3
@@ -14,13 +15,18 @@ from datetime import date, datetime, timezone
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
-from atlas_api.analyst.briefing import Setup, build_briefing
+from atlas_api.agent import chat as chat_agent
 from atlas_api.analyst.option_analysis import OptionCtx, analyze_option
+from atlas_api.analyst.setups import call_spread_briefing
 from atlas_api.data import store
 from atlas_api.models import (
     BriefingResponse,
     ChainRow,
+    ChatRequest,
+    ChatResponse,
+    ChatToolCall,
     HistoryPoint,
     HistoryResponse,
     OptionAnalysisOut,
@@ -40,13 +46,23 @@ from atlas_api.models import (
 )
 from atlas_api.data.calendar_b3 import year_fraction
 from atlas_api.pricing.american import bjerksund_stensland
-from atlas_api.pricing.bs import bs_greeks, bs_price
-from atlas_api.pricing.iv import implied_vol
 from atlas_api.pricing.risk import SPOT_SHOCKS, payoff_at_expiry, payoff_grid, stress_pnl
 from atlas_api.pricing.rv import realized_vol
 from atlas_api.pricing.signal import iv_rank
+from atlas_api.predict.engine import (
+    build_calibration_health,
+    build_decision,
+    build_edge_backtest,
+    build_edge_map,
+    build_fair_iv,
+    build_prediction,
+    build_pricing_kernel,
+    build_strategies,
+)
 
-_FIXTURE = "fixture (sintético) — sem dado real de mercado ainda"
+# universo líquido (IV + OHLC confiáveis) para o backtest gated do edge
+_BACKTEST_UNIVERSE = ["PETR4", "VALE3", "ITUB4", "BBDC4", "BBAS3", "B3SA3",
+                      "ABEV3", "WEGE3", "PRIO3", "BOVA11", "ITSA4", "GGBR4"]
 
 app = FastAPI(title="ATLAS API", version="0.1.0")
 app.add_middleware(
@@ -77,8 +93,19 @@ def _store_conn():
             return None
         return conn
     except sqlite3.DatabaseError:
-        # corrupted / not a sqlite file -> fall back to the labeled fixture
+        # corrupted / not a sqlite file -> treat as "no real data" (503), never fake
         return None
+
+
+def _require_conn() -> sqlite3.Connection:
+    """Connection to a populated store, or 503 — never a synthetic fallback."""
+    conn = _store_conn()
+    if conn is None:
+        raise HTTPException(
+            status_code=503,
+            detail="sem dado de mercado — defina ATLAS_DB e rode a ingestão (python -m atlas_api.cli update)",
+        )
+    return conn
 
 
 @app.get("/health")
@@ -86,39 +113,10 @@ def health() -> dict:
     return {"status": "ok", "service": "atlas-api"}
 
 
-def _sample_setup() -> Setup:
-    return Setup(
-        ticker="PETRG38", underlying="PETR4", structure="venda_premio",
-        iv=0.42, rv=0.33, max_gain_per_lot=0.62, max_loss_per_lot=0.38,
-        breakeven=38.62, delta=0.30, liquidity_brl=88_000_000, dte=24, capital=60_000,
-    )
-
-
-@app.get("/briefing/sample", response_model=BriefingResponse)
-def briefing_sample() -> BriefingResponse:
-    b = build_briefing(_sample_setup())
-    return BriefingResponse(
-        ticker=b.ticker,
-        setup_facts=b.setup_facts,
-        case_for=b.case_for,
-        case_against=b.case_against,
-        risk_reward=RiskRewardOut(**vars(b.risk_reward)),
-        sizing={k: SizingOut(**vars(v)) for k, v in b.sizing.items()},
-        invalidation=b.invalidation,
-        confidence=b.confidence,
-        verdict=b.verdict,
-        provenance=_FIXTURE,
-        asof=_now(),
-    )
-
-
 @app.get("/summary")
 def summary() -> dict:
     """Real headline metrics for the dashboard (no hardcoded numbers)."""
-    conn = _store_conn()
-    if conn is None:
-        return {"provenance": _FIXTURE, "asof": None, "underlyings": 0,
-                "com_sinal": 0, "rico": 0, "barato": 0, "vol_total": 0.0, "bova11": None}
+    conn = _require_conn()
     rows = store.query_screener(conn, tipo="acao", min_liq=0, limit=10000)
     asof = store.get_meta(conn, "asof") or ""
     conn.close()
@@ -140,46 +138,14 @@ def briefing(underlying: str, capital: float = 50000.0) -> BriefingResponse:
     """Real briefing for a real underlying: a defined-risk call spread built from
     two adjacent strikes of the nearest expiry, with real premiums/IV/RV."""
     underlying = underlying.upper()
-    conn = _store_conn()
-    if conn is None:
-        raise HTTPException(status_code=503, detail="sem store real — defina ATLAS_DB e ingira COTAHIST")
-    stocks = [r for r in store.query_screener(conn, tipo="acao", min_liq=0, limit=10000)
-              if r["ticker"] == underlying]
-    closes = [c for (_o, _h, _l, c) in store.price_history(conn, underlying)]
-    chain = store.query_chain(conn, underlying)
+    conn = _require_conn()
     asof = store.get_meta(conn, "asof") or ""
-    conn.close()
-
-    if not stocks:
-        raise HTTPException(status_code=404, detail=f"{underlying} não encontrado")
-    spot = stocks[0]["ultimo"]
-    rv = realized_vol(closes) if len(closes) >= 3 else float("nan")
-    calls = [o for o in chain if o["kind"] == "call" and o["iv"] is not None and o["strike"] and o["venc"]]
-    if spot is None or rv != rv or len(calls) < 2:
-        raise HTTPException(status_code=422,
-                            detail=f"dados insuficientes para briefing de {underlying} (precisa RV + cadeia de calls)")
-
-    near_venc = min(o["venc"] for o in calls)
-    near = sorted((o for o in calls if o["venc"] == near_venc), key=lambda o: o["strike"])
-    i = min(range(len(near)), key=lambda k: abs(near[k]["strike"] - spot))
-    if i + 1 >= len(near):
-        i = len(near) - 2
-    short_leg, long_leg = near[i], near[i + 1]
-    width = long_leg["strike"] - short_leg["strike"]
-    credit = short_leg["last"] - long_leg["last"]
-    dte = (date.fromisoformat(near_venc) - date.fromisoformat(asof)).days if asof else 21
-
-    setup = Setup(
-        ticker=short_leg["ticker"], underlying=underlying, structure="trava_alta_vendida",
-        iv=short_leg["iv"], rv=round(rv, 4),
-        max_gain_per_lot=round(max(credit, 0.0), 2),
-        max_loss_per_lot=round(max(width - credit, 0.01), 2),
-        breakeven=round(short_leg["strike"] + credit, 2),
-        delta=short_leg["delta"] or 0.3,
-        liquidity_brl=stocks[0]["liquidez"] or 0.0,
-        dte=max(dte, 1), capital=capital,
-    )
-    b = build_briefing(setup)
+    try:
+        b, err = call_spread_briefing(conn, underlying, capital=capital)
+    finally:
+        conn.close()
+    if err:
+        raise HTTPException(status_code=404 if "não encontrado" in err else 422, detail=err)
     return BriefingResponse(
         ticker=b.ticker, setup_facts=b.setup_facts, case_for=b.case_for, case_against=b.case_against,
         risk_reward=RiskRewardOut(**vars(b.risk_reward)),
@@ -191,17 +157,7 @@ def briefing(underlying: str, capital: float = 50000.0) -> BriefingResponse:
 
 @app.get("/screener", response_model=list[ScreenerRow])
 def screener() -> list[ScreenerRow]:
-    conn = _store_conn()
-    if conn is None:
-        now = _now()
-        return [
-            ScreenerRow(ticker="PETR4", tipo="acao", ultimo=38.42, var_pct=1.2,
-                        liquidez=1.2e9, provenance=_FIXTURE, asof=now),
-            ScreenerRow(ticker="PETRG38", tipo="call", ultimo=1.15, var_pct=4.5,
-                        liquidez=88e6, iv=0.42, iv_vs_rv="rico", provenance=_FIXTURE, asof=now),
-            ScreenerRow(ticker="VALE3", tipo="acao", ultimo=61.30, var_pct=-0.8,
-                        liquidez=9.8e8, provenance=_FIXTURE, asof=now),
-        ]
+    conn = _require_conn()
     rows = store.query_screener(conn, limit=200)
     asof = store.get_meta(conn, "asof") or ""
     conn.close()
@@ -225,25 +181,7 @@ def screener() -> list[ScreenerRow]:
 
 @app.get("/chain/{underlying}", response_model=list[ChainRow])
 def chain(underlying: str) -> list[ChainRow]:
-    conn = _store_conn()
-    if conn is None:
-        now = _now()
-        spot, r, q, T, sigma = 38.42, 0.105, 0.0, 24 / 252, 0.40
-        rows: list[ChainRow] = []
-        for strike in (36.0, 38.0, 40.0):
-            for kind in ("call", "put"):
-                last = bs_price(kind, spot, strike, r, q, T, sigma)
-                iv = implied_vol(kind, last, spot, strike, r, q, T)
-                g = bs_greeks(kind, spot, strike, r, q, T, sigma)
-                rows.append(ChainRow(
-                    ticker=f"{underlying}{kind[0].upper()}{int(strike)}",
-                    kind=kind, strike=strike, last=round(last, 2),
-                    iv=_nan_to_none(iv), delta=_nan_to_none(g["delta"]),
-                    gamma=_nan_to_none(g["gamma"]), vega=_nan_to_none(g["vega"]),
-                    theta=_nan_to_none(g["theta"] / 252),
-                    provenance=_FIXTURE, asof=now,
-                ))
-        return rows
+    conn = _require_conn()
     store_rows = store.query_chain(conn, underlying)
     asof = store.get_meta(conn, "asof") or ""
     conn.close()
@@ -362,9 +300,7 @@ def _stress_inputs(conn) -> list[tuple[float, float, float, float]]:
 def history(ticker: str, window: int = 21) -> HistoryResponse:
     """Time series of ATM implied vol vs trailing realized vol for an underlying."""
     ticker = ticker.upper()
-    conn = _store_conn()
-    if conn is None:
-        return HistoryResponse(ticker=ticker, points=[], provenance=_FIXTURE, asof=None)
+    conn = _require_conn()
     closes = store.close_series(conn, ticker)
     ivs = dict(store.iv_series(conn, ticker))
     asof = store.get_meta(conn, "asof")
@@ -384,13 +320,186 @@ def history(ticker: str, window: int = 21) -> HistoryResponse:
     return HistoryResponse(ticker=ticker, points=points, iv_rank=rank, provenance=prov, asof=asof)
 
 
+@app.get("/predict/{ticker}")
+def predict(ticker: str, horizon: int = 30) -> dict:
+    """Predição calibrada: σ forecast + densidade física (POP/quantis) + regime + calibração.
+
+    Tudo sobre o dado real do store; honesto quando o histórico é curto (sem fabricar).
+    """
+    ticker = ticker.upper()
+    conn = _require_conn()
+    inst = store.get_instrument(conn, ticker)
+    spot = inst.get("ultimo") if inst else None
+    ohlc = store.price_history(conn, ticker, limit=400)
+    iv_hist = store.iv_history(conn, ticker, limit=400)
+    chain = store.query_chain(conn, ticker, limit=3000)
+    asof = store.get_meta(conn, "asof")
+    conn.close()
+    closes = [bar[3] for bar in ohlc]            # closes do próprio OHLC: alinhamento garantido
+    return build_prediction(ticker=ticker, ohlc=ohlc, closes=closes, iv_history=iv_hist,
+                            spot=spot, chain=chain, asof=asof, T_days=horizon)
+
+
+@app.get("/strategies/{ticker}")
+def strategies(ticker: str, capital: float = 20000.0, prazo: int = 30, visao: str = "alta") -> dict:
+    """Consultor de estratégias: catálogo de estruturas avaliadas por POP + valor esperado.
+
+    ``capital`` = orçamento de risco; ``visao`` ∈ {alta, baixa, neutro, renda}. Análise sobre
+    a densidade real do motor + a cadeia real; honesto quando falta dado. Nunca ordem.
+    """
+    ticker = ticker.upper()
+    conn = _require_conn()
+    inst = store.get_instrument(conn, ticker)
+    spot = inst.get("ultimo") if inst else None
+    ohlc = store.price_history(conn, ticker, limit=400)
+    iv_hist = store.iv_history(conn, ticker, limit=400)
+    chain = store.query_chain(conn, ticker, limit=5000)
+    asof = store.get_meta(conn, "asof")
+    conn.close()
+    closes = [bar[3] for bar in ohlc]
+    return build_strategies(ticker=ticker, ohlc=ohlc, closes=closes, iv_history=iv_hist,
+                            spot=spot, chain=chain, asof=asof, capital=capital, prazo=prazo, visao=visao)
+
+
+@app.get("/edge/{ticker}")
+def edge(ticker: str, horizon: int = 30) -> dict:
+    """Mapa de Prêmio: prob. RISCO-NEUTRA (mercado) vs FÍSICA calibrada, por strike — o diferencial.
+
+    Mostra onde e por quanto o mercado sobrevaloriza/subvaloriza cada strike vs a nossa densidade
+    validada. Honesto: recusa quando a smile de mercado não é confiável. Análise, não recomendação.
+    """
+    ticker = ticker.upper()
+    conn = _require_conn()
+    inst = store.get_instrument(conn, ticker)
+    spot = inst.get("ultimo") if inst else None
+    ohlc = store.price_history(conn, ticker, limit=400)
+    iv_hist = store.iv_history(conn, ticker, limit=400)
+    chain = store.query_chain(conn, ticker, limit=5000)
+    asof = store.get_meta(conn, "asof")
+    conn.close()
+    closes = [bar[3] for bar in ohlc]
+    return build_edge_map(ticker=ticker, ohlc=ohlc, closes=closes, iv_history=iv_hist,
+                          spot=spot, chain=chain, asof=asof, T_days=horizon)
+
+
+@app.get("/kernel/{ticker}")
+def kernel(ticker: str, horizon: int = 30) -> dict:
+    """Pricing kernel empírico M(S)=q/p — o SDF por nome (a forma teoricamente correta do Edge Map).
+
+    O preço de estado por unidade de probabilidade: onde o mercado paga prêmio de risco. Só o ATLAS
+    monta (exige a densidade física calibrada). Honesto: recusa quando a smile não é confiável.
+    """
+    ticker = ticker.upper()
+    conn = _require_conn()
+    inst = store.get_instrument(conn, ticker)
+    spot = inst.get("ultimo") if inst else None
+    ohlc = store.price_history(conn, ticker, limit=400)
+    iv_hist = store.iv_history(conn, ticker, limit=400)
+    chain = store.query_chain(conn, ticker, limit=5000)
+    asof = store.get_meta(conn, "asof")
+    conn.close()
+    closes = [bar[3] for bar in ohlc]
+    return build_pricing_kernel(ticker=ticker, ohlc=ohlc, closes=closes, iv_history=iv_hist,
+                                spot=spot, chain=chain, asof=asof, T_days=horizon)
+
+
+@app.get("/fair-iv/{ticker}")
+def fair_iv(ticker: str, horizon: int = 30) -> dict:
+    """Fair IV: a smile justa pela nossa vol física vs a smile de mercado — o VRP por strike em vol points.
+
+    A língua do trader: quantos pontos de vol o mercado cobra acima do justo, por strike, e onde está a
+    maior oportunidade. Honesto: recusa quando a smile de mercado não é confiável.
+    """
+    ticker = ticker.upper()
+    conn = _require_conn()
+    inst = store.get_instrument(conn, ticker)
+    spot = inst.get("ultimo") if inst else None
+    ohlc = store.price_history(conn, ticker, limit=400)
+    iv_hist = store.iv_history(conn, ticker, limit=400)
+    chain = store.query_chain(conn, ticker, limit=5000)
+    asof = store.get_meta(conn, "asof")
+    conn.close()
+    closes = [bar[3] for bar in ohlc]
+    return build_fair_iv(ticker=ticker, ohlc=ohlc, closes=closes, iv_history=iv_hist,
+                         spot=spot, chain=chain, asof=asof, T_days=horizon)
+
+
+@app.get("/calibration-health/{ticker}")
+def calibration_health(ticker: str) -> dict:
+    """Monitor de descalibração (PIT-break): a densidade ainda está confiável HOJE, e desde quando.
+
+    Série rolante do p-valor do PIT — quando cai sob 0.05, o modelo perdeu o regime. Honestidade
+    auditada como sinal: dá a saúde atual e há quantos pregões foi a última quebra.
+    """
+    ticker = ticker.upper()
+    conn = _require_conn()
+    ohlc = store.price_history(conn, ticker, limit=400)
+    asof = store.get_meta(conn, "asof")
+    conn.close()
+    closes = [bar[3] for bar in ohlc]
+    return build_calibration_health(ticker=ticker, ohlc=ohlc, closes=closes, asof=asof)
+
+
+@app.get("/edge-backtest/{ticker}")
+def edge_backtest(ticker: str) -> dict:
+    """Backtest econômico do edge: o sinal de VRP físico ('vender vol cara') sobrevive à deflação?
+
+    Walk-forward sobre o universo líquido, Deflated Sharpe (López de Prado) descontando o multiple-
+    testing. Verdicto HONESTO — registra se não passa (com ~1 ano a potência é baixa). Curva de
+    equity do ativo pedido. A prova econômica que falta ao Edge Map.
+    """
+    ticker = ticker.upper()
+    conn = _require_conn()
+    names = list(dict.fromkeys([ticker, *_BACKTEST_UNIVERSE]))
+    universe: list[dict] = []
+    for nm in names:
+        ohlc = store.price_history(conn, nm, limit=400)
+        iv_hist = store.iv_history(conn, nm, limit=400)
+        if not ohlc or not iv_hist:
+            continue
+        universe.append({"ticker": nm, "ohlc": ohlc, "closes": [b[3] for b in ohlc], "iv_history": iv_hist})
+    asof = store.get_meta(conn, "asof")
+    conn.close()
+    return build_edge_backtest(ticker=ticker, universe=universe, asof=asof)
+
+
+@app.get("/decision/{ticker}")
+def decision(ticker: str, visao: str = "alta", capital: float = 20000.0,
+             prazo: int = 30, perfil: str = "moderado") -> dict:
+    """Cartão de Decisão: a síntese que vira decisão — o quê, por quê, quanto, com que confiança.
+
+    Sintetiza todos os sinais do motor num veredicto por estrutura, com sizing Kelly+CVaR sob
+    incerteza e abstenção honesta (não opera quando a densidade perdeu o regime). Análise, nunca ordem.
+    """
+    ticker = ticker.upper()
+    conn = _require_conn()
+    inst = store.get_instrument(conn, ticker)
+    spot = inst.get("ultimo") if inst else None
+    ohlc = store.price_history(conn, ticker, limit=400)
+    iv_hist = store.iv_history(conn, ticker, limit=400)
+    chain = store.query_chain(conn, ticker, limit=5000)
+    asof = store.get_meta(conn, "asof")
+    # gate econômico (deflated Sharpe do universo) — o mesmo p/ todos; alimenta a confiança da decisão
+    universe: list[dict] = []
+    for nm in dict.fromkeys([ticker, *_BACKTEST_UNIVERSE]):
+        o = store.price_history(conn, nm, limit=400)
+        iv = store.iv_history(conn, nm, limit=400)
+        if o and iv:
+            universe.append({"ticker": nm, "ohlc": o, "closes": [b[3] for b in o], "iv_history": iv})
+    conn.close()
+    bt = build_edge_backtest(ticker=ticker, universe=universe, asof=asof)
+    dsr = bt.get("deflated_sharpe") if bt.get("available") else None
+    closes = [bar[3] for bar in ohlc]
+    return build_decision(ticker=ticker, ohlc=ohlc, closes=closes, iv_history=iv_hist, spot=spot,
+                          chain=chain, asof=asof, visao=visao, capital=capital, prazo=prazo,
+                          perfil=perfil, backtest_dsr=dsr)
+
+
 @app.get("/option/{ticker}", response_model=OptionAnalysisOut)
 def option_panel(ticker: str) -> OptionAnalysisOut:
     """Didactic, two-sided decision panel for a single option series."""
     ticker = ticker.upper()
-    conn = _store_conn()
-    if conn is None:
-        raise HTTPException(status_code=404, detail="sem dado de mercado — defina ATLAS_DB e rode a ingestão")
+    conn = _require_conn()
     opt = store.get_option(conn, ticker)
     if not opt or not opt.get("strike"):
         conn.close()
@@ -420,9 +529,7 @@ def option_panel(ticker: str) -> OptionAnalysisOut:
 def surface(ticker: str) -> SurfaceResponse:
     """IV term structure (ATM IV per maturity) + the full smile x maturity grid."""
     ticker = ticker.upper()
-    conn = _store_conn()
-    if conn is None:
-        return SurfaceResponse(ticker=ticker, expiries=[], points=[], provenance=_FIXTURE)
+    conn = _require_conn()
     rows = store.query_chain(conn, ticker, limit=3000)
     inst = store.get_instrument(conn, ticker)
     asof = store.get_meta(conn, "asof")
@@ -467,10 +574,10 @@ def portfolio_stress() -> StressResponse:
 
 
 def _payoff_inputs(conn, asof: str | None) -> list[tuple]:
-    """Per-position (kind, strike, spot, qty, mult, entry, iv, T) for the payoff.
+    """Per-position (kind, strike, spot, qty, mult, entry, iv, T, delta) for the payoff.
 
     iv/T let the 'today' curve be a full revaluation (exact, no Taylor divergence);
-    None for a stock leg.
+    ``delta`` is the linear fallback when IV/T are missing. None for a stock leg.
     """
     asof_d = date.fromisoformat(asof) if asof else None
     out: list[tuple] = []
@@ -485,9 +592,10 @@ def _payoff_inputs(conn, asof: str | None) -> list[tuple]:
             if spot is None or opt.get("strike") is None:
                 continue
             t = year_fraction(asof_d, date.fromisoformat(opt["venc"])) if (asof_d and opt.get("venc")) else None
-            out.append((inst["tipo"], opt["strike"], spot, qty, 100, opt.get("last") or 0.0, opt.get("iv"), t))
+            out.append((inst["tipo"], opt["strike"], spot, qty, 100,
+                        opt.get("last") or 0.0, opt.get("iv"), t, opt.get("delta")))
         else:
-            out.append((None, None, inst["ultimo"] or 0.0, qty, 1, 0.0, None, None))  # stock leg
+            out.append((None, None, inst["ultimo"] or 0.0, qty, 1, 0.0, None, None, None))  # stock leg
     return out
 
 
@@ -496,17 +604,23 @@ def _payoff_now(positions: list[tuple], shock: float, r: float) -> float:
 
     Options are repriced with Bjerksund-Stensland at the bumped spot (same IV/T);
     the difference is exactly 0 at shock 0 and captures convexity without Taylor
-    divergence. Falls back to delta-only if IV/T are unavailable.
+    divergence. When IV/T are unavailable (IV suppressed by the reliability gate),
+    it falls back to a linear delta approximation rather than silently flatlining
+    that leg; a leg with neither IV nor delta contributes 0 (and is, honestly,
+    unknown today).
     """
     total = 0.0
-    for kind, strike, spot, qty, mult, _entry, iv, t in positions:
+    for kind, strike, spot, qty, mult, _entry, iv, t, delta in positions:
         s2 = (spot or 0.0) * (1.0 + shock)
+        ds = s2 - (spot or 0.0)
         if kind is None:
-            total += (qty or 0.0) * (s2 - (spot or 0.0))
+            total += (qty or 0.0) * ds
         elif iv and t and t > 0:
             v2 = bjerksund_stensland(kind, s2, strike, r, 0.0, t, iv)
             v0 = bjerksund_stensland(kind, spot, strike, r, 0.0, t, iv)
             total += (qty or 0.0) * mult * (v2 - v0)
+        elif delta is not None:  # IV/T missing -> linear delta fallback (documented)
+            total += (qty or 0.0) * mult * delta * ds
     return round(total, 2)
 
 
@@ -530,3 +644,52 @@ def portfolio_payoff() -> PayoffResponse:
         provenance=f"COTAHIST EOD {asof}" if asof else "sem dado de mercado",
         asof=asof or None,
     )
+
+
+@app.post("/chat", response_model=ChatResponse)
+def chat(req: ChatRequest) -> ChatResponse:
+    """Natural-language Q&A about options and stocks, grounded in the real store.
+
+    The LLM (or the deterministic fallback) may only report numbers a tool
+    returned from this same EOD store — it cannot invent prices/IV/greeks.
+    Analysis, not recommendation; every reply carries provenance + asof.
+    """
+    conn = _require_conn()
+    asof = store.get_meta(conn, "asof")
+    try:
+        res = chat_agent.answer(req.question, req.history, conn=conn)
+    finally:
+        conn.close()
+    return ChatResponse(
+        answer=res.answer,
+        mode=res.mode,
+        tool_calls=[ChatToolCall(name=c["name"], args=c.get("args", {})) for c in res.tool_calls],
+        provenance=f"COTAHIST EOD {asof}" if asof else "COTAHIST EOD",
+        asof=asof,
+        note=res.note,
+    )
+
+
+@app.post("/chat/stream")
+def chat_stream(req: ChatRequest) -> StreamingResponse:
+    """Same as /chat, but streamed (SSE): 'tool' / 'delta' events then 'done'.
+
+    Lets the UI render the answer token-by-token and show which tools were
+    consulted as they fire. Grounding is identical — numbers only from tools.
+    """
+    conn = _require_conn()
+    asof = store.get_meta(conn, "asof")
+    prov = f"COTAHIST EOD {asof}" if asof else "COTAHIST EOD"
+
+    def gen():
+        try:
+            for ev in chat_agent.answer_stream(req.question, req.history, conn=conn):
+                if ev.get("type") == "done":
+                    ev = {**ev, "provenance": prov, "asof": asof}
+                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+        except Exception as e:  # never leak a raw stack into the stream
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        finally:
+            conn.close()
+
+    return StreamingResponse(gen(), media_type="text/event-stream")

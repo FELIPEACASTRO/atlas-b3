@@ -31,7 +31,7 @@ type Stress = {
   theta_per_day: number;
 };
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
 const fmt = (n: number | null, d = 2): string => (n == null ? "—" : n.toFixed(d));
 const brl = (n: number | null): string =>
@@ -80,8 +80,17 @@ export function Portfolio() {
   }
 
   async function remove(t: string) {
-    await fetch(`${API}/positions/${t}`, { method: "DELETE" });
-    load();
+    try {
+      const r = await fetch(`${API}/positions/${t}`, { method: "DELETE" });
+      if (!r.ok) {
+        setErr("não foi possível remover a posição");
+        return;
+      }
+      setErr("");
+      load();
+    } catch {
+      setErr("não foi possível remover a posição (sem conexão com a API)");
+    }
   }
 
   return (
@@ -154,8 +163,8 @@ export function Portfolio() {
       {rows.length === 0 ? (
         <p className="text-[13px] text-[var(--text-tertiary)]">Sem posições. Adicione um ticker acima (ações ou opções).</p>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-[var(--border-subtle)]">
-          <table className="w-full text-[13px]">
+        <div className="overflow-x-auto rounded-xl border border-[var(--border-subtle)]">
+          <table className="w-full min-w-[640px] text-[13px]">
             <thead>
               <tr className="bg-[var(--bg-surface)] text-left text-[var(--text-secondary)]">
                 <th className="px-4 py-2.5 font-normal">Ativo</th>

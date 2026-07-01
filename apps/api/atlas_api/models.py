@@ -156,6 +156,30 @@ class SurfaceResponse(BaseModel):
     asof: str | None = None
 
 
+class ChatMessage(BaseModel):
+    role: str       # "user" | "assistant"
+    content: str
+
+
+class ChatToolCall(BaseModel):
+    name: str
+    args: dict = {}
+
+
+class ChatRequest(BaseModel):
+    question: str
+    history: list[ChatMessage] = []
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    mode: str                          # "ia" (LLM) | "limitado" (fallback)
+    tool_calls: list[ChatToolCall] = []
+    provenance: str
+    asof: str | None = None
+    note: str | None = None
+
+
 class GreekNoteOut(BaseModel):
     nome: str
     valor: str

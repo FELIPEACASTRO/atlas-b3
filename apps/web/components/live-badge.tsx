@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
 export function LiveBadge() {
   const [label, setLabel] = useState("EOD");
@@ -11,14 +11,17 @@ export function LiveBadge() {
   useEffect(() => {
     let alive = true;
     fetch(`${API}/summary`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(String(r.status));
+        return r.json();
+      })
       .then((d: { asof: string | null }) => {
         if (!alive) return;
         if (d.asof) {
           setLabel(`EOD ${d.asof}`);
           setOk(true);
         } else {
-          setLabel("fixture (sem dado real)");
+          setLabel("sem dado de mercado");
         }
       })
       .catch(() => alive && setLabel("API offline"));
